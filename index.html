@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NGS Calculator | Prepared by Gaetano Bonifacio PhD, MBA | 2026</title>
+<meta name="description" content="Interactive NGS panel multiplexing and cost calculator. Prepared by Gaetano Bonifacio PhD, MBA, 2026." />
+<style>
+  html, body { margin: 0; padding: 0; background: #0a0e14; }
+  #root { min-height: 100vh; }
+  #boot { color: #8b9bb0; font-family: ui-sans-serif, system-ui, sans-serif; padding: 40px 30px; font-size: 14px; }
+  #boot b { color: #36d6c3; }
+  #err { display: none; color: #ff7a85; font-family: ui-monospace, monospace; padding: 20px 30px; white-space: pre-wrap; font-size: 12.5px; }
+</style>
+<!-- Pinned CDN dependencies. Order matters: React and PropTypes must load before Recharts. -->
+<script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/recharts@2.15.4/umd/Recharts.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"><div id="boot">Loading <b>NGS Calculator</b> ...</div></div>
+<pre id="err"></pre>
+<script>
+  // Guardrail: surface a clear message if a CDN dependency failed to load,
+  // instead of a blank page.
+  window.addEventListener("DOMContentLoaded", function () {
+    var missing = [];
+    if (typeof React === "undefined") missing.push("React");
+    if (typeof ReactDOM === "undefined") missing.push("ReactDOM");
+    if (typeof Recharts === "undefined") missing.push("Recharts");
+    if (typeof Babel === "undefined") missing.push("Babel");
+    if (missing.length) {
+      var e = document.getElementById("err");
+      e.style.display = "block";
+      e.textContent = "Could not load: " + missing.join(", ") +
+        ". A content-delivery network may be blocked on this network. Try another network or open the file with internet access.";
+    }
+  });
+  window.addEventListener("error", function (ev) {
+    var e = document.getElementById("err");
+    if (e) { e.style.display = "block"; e.textContent = "Render error: " + (ev.message || ev.error || ev); }
+  });
+</script>
+<script type="text/babel" data-presets="react" data-type="module">
+
+const { useState, useMemo } = React;
+const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } = Recharts;
+
+/* =========================================================================
+   VERIFIED CALCULATION LOGIC
+   Routine economics checked against LibreOffice recalc + hand derivation.
+   Robot and sequencer per-sample cost = total price / annual sample volume.
+   ========================================================================= */
+const ROBOT_MODELS = ["STAR (Hamilton)", "STARlet (Hamilton)", "Biomek i5 (Beckman Coulter)", "Biomek i7 (Beckman Coulter)", "Fontus (Revvity)"];
+
+const roundup = (x, n = 0) => { const f = 10 ** n; return Math.ceil(Math.abs(x) * f) / f * (x >= 0 ? 1 : -1); };
+const perSample = (total, volume) => (volume > 0 ? total / volume : NaN);
+function routine(panels, H, fcCost, runs, multiplex, runtime, priceOverride) {
+  const rows = []; let seen = false;
+  panels.forEach((p, i) => {
+    if (!p.name) return;
+    const cov = (p.reads && H) ? (p.samples * p.reads) / H : 0;
+    const rt = !seen ? runtime : 0; seen = true;
+    const price = (priceOverride && priceOverride[i] != null) ? priceOverride[i] : p.price;
+    rows.push({ name: p.name, samples: p.samples, price, cov, rt, reads: p.reads, H });
+  });
+  const E9 = rows.reduce((a, r) => a + r.price * r.samples, 0);
+  const N9 = rows.reduce((a, r) => a + r.samples, 0) * runs;
+  const rtTotal = rows.reduce((a, r) => a + r.rt, 0);
+  const P = rows.reduce((a, r) => a + r.cov, 0);
+  const fcNeeded = multiplex ? (P ? Math.ceil(P) : 0) : rows.reduce((a, r) => a + roundup(r.cov), 0);
+  const B12 = E9 + fcCost, F12 = B12 * runs, H12 = N9 ? F12 / N9 : 0;
+  return { reagent: E9, run_cost: B12, yearly: F12, cost_sample: H12, samples_year: N9, run_time: rtTotal, fc_needed: fcNeeded, prices: rows.map(r => r.price), coverage: P, detail: rows };
+}
+function model(inp) {
+  const cur = routine(inp.curPanels, inp.curH, inp.C10, inp.C11, inp.C4, inp.curRuntime);
+  const futOverride = cur.prices.concat([null, null, null]);
+  const fut = routine(inp.futPanels, inp.futH, inp.C20, inp.C21, inp.C14, inp.futRuntime, futOverride);
+  const K4 = cur.cost_sample, K5 = cur.run_cost, K6 = cur.yearly;
+  const K8 = cur.samples_year ? fut.yearly / cur.samples_year : 0, K9 = fut.run_cost, K10 = fut.yearly;
+  const robotOn = inp.C25, seqOn = inp.C33;
+  // Per-sample equipment cost = total price divided by annual sample volume
+  const C27 = robotOn ? perSample(inp.robotPrice, inp.robotVol) : 0;
+  const C35 = seqOn ? perSample(inp.seqPrice, inp.seqVol) : 0;
+  const num = v => typeof v === "number" && !isNaN(v);
+  const c27 = num(C27) ? C27 : 0, c35 = num(C35) ? C35 : 0;
+  const C28 = inp.C28, sumD = inp.futPanels.reduce((a, p) => a + (p.name ? p.samples : 0), 0);
+  const K12 = (K8 + (robotOn ? c27 : 0)) + C28;
+  const K20 = K8 + (robotOn ? c27 + C28 : 0) + (seqOn ? c35 : 0);
+  const K21 = K9 + (robotOn ? (c27 + C28) * sumD : 0) + (seqOn ? c35 * sumD : 0);
+  const K22 = K10 + (robotOn ? (c27 + C28) * sumD * inp.C21 : 0) + (seqOn ? c35 * sumD * inp.C21 : 0);
+  return {
+    K4, K5, K6, K8, K9, K10, C27, C35, K12, K20, K21, K22,
+    robotPriceValid: !robotOn || num(C27), seqPriceValid: !seqOn || num(C35),
+    cur_fc: cur.fc_needed, fut_fc: fut.fc_needed, cur_runtime: cur.run_time, fut_runtime: fut.run_time,
+    cur_cov: cur.coverage, fut_cov: fut.coverage,
+    cur_samples_year: cur.samples_year, fut_samples_year: fut.samples_year,
+    cur_H: inp.curH, fut_H: inp.futH,
+    yr_savings: K6 - K10, persample_savings: K4 - K8,
+  };
+}
+
+/* ============================ SEEDED DATA ============================ */
+// Only TruSight Oncology 500 is provided as an example. Remaining rows are blank
+// for the user to fill with their own panels (name, M reads per sample, price).
+const SEED_BUNDLES = [
+  { name: "TruSight Oncology 500", reads: 100, price: 690 },
+  ...Array.from({ length: 7 }, () => ({ name: "", reads: 0, price: 0 })),
+];
+// Flow cells are grouped under the sequencer they belong to. Each carries its own
+// M reads per flow cell and run time. Add sequencers or flow cells in the database.
+const SEED_SEQUENCERS = [
+  { name: "AVITI", flowcells: [["Low Output",500,27],["Medium Output 150",1000,31],["Medium Output 300",100,51],["High Output 150",2000,38],["High Output 300",300,60]] },
+  { name: "MiSeq i100 plus", flowcells: [["50M PE 150",100,7.5],["50M PE 300",100,15.5],["100M PE",200,8]] },
+  { name: "NextSeq 550", flowcells: [["Mid Output",260,26],["High Output",800,29]] },
+  { name: "NextSeq 1000", flowcells: [["P1 150",200,17],["P1 300",200,34],["P2 standard 150",800,22],["P2 300",600,42]] },
+  { name: "NextSeq 2000", flowcells: [["P1 150",200,17],["P1 300",200,34],["P2 standard 150",800,22],["P2 300",600,42],["P3",2400,40],["P4",3600,44]] },
+  { name: "NovaSeq 6000", flowcells: [["SP 150",800,25],["SP 250",800,38],["S1",1600,25],["S2",4100,36],["S4",5000,44]] },
+  { name: "NovaSeq X", flowcells: [["10B",20000,25],["25B",52000,48]] },
+  { name: "MGI T7", flowcells: [["FCL 1 lane, 1 flow cell",11600,24]] },
+  { name: "MGI G400", flowcells: [["DNBSeq FCL 1of 4",900,56],["DNBSeq FCS 300 reads",300,98],["DNBSeq FCS 150 reads",550,37]] },
+].map(s => ({ name: s.name, flowcells: s.flowcells.map(([name, reads, runtime]) => ({ name, reads, runtime })) }));
+const COPYRIGHT = "Prepared by Gaetano Bonifacio PhD, MBA | 2026";
+
+/* ============================ FORMATTERS ============================ */
+const usd0 = n => (n == null || isNaN(n)) ? "-" : n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const usd2 = n => (n == null || isNaN(n)) ? "-" : n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct1 = n => (n == null || isNaN(n)) ? "-" : (n * 100).toFixed(1) + "%";
+
+/* ============================ UI PRIMITIVES ============================ */
+function Field({ label, children, hint }) {
+  return (
+    <label className="field">
+      <span className="field-label">{label}{hint && <em className="field-hint">{hint}</em>}</span>
+      {children}
+    </label>
+  );
+}
+function Select({ value, onChange, options }) {
+  return (
+    <select className="ctrl" value={value} onChange={e => onChange(e.target.value)}>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+function Num({ value, onChange, step = 1, min = 0 }) {
+  return <input className="ctrl" type="number" step={step} min={min} value={value}
+    onChange={e => onChange(e.target.value === "" ? "" : Number(e.target.value))} />;
+}
+function Toggle({ value, onChange }) {
+  return (
+    <div className="toggle">
+      {["Yes", "No"].map(v => (
+        <button key={v} className={"toggle-btn" + (value === v ? " on" : "")} onClick={() => onChange(v)}>{v}</button>
+      ))}
+    </div>
+  );
+}
+
+/* ============================ ROUTINE EDITOR ============================ */
+function RoutineCard({ title, accent, state, set, bundleNames, readout, sequencerNames, seqMap }) {
+  const flowOptions = (seqMap[state.sequencer]?.flowcells || []).map(f => f.name);
+  const setSeq = (seq) => {
+    const opts = (seqMap[seq]?.flowcells || []).map(f => f.name);
+    const flow = opts.includes(state.flowcell) ? state.flowcell : (opts[0] || "");
+    set({ ...state, sequencer: seq, flowcell: flow });
+  };
+  const setPanel = (i, key, v) => {
+    const panels = state.panels.map((p, idx) => idx === i ? { ...p, [key]: v } : p);
+    set({ ...state, panels });
+  };
+  const r = readout || {};
+  return (
+    <div className="card" style={{ "--accent": accent }}>
+      <div className="card-head"><span className="dot" /> {title}</div>
+      <Field label="Multiplex panels on one flow cell?">
+        <Toggle value={state.multiplex} onChange={v => set({ ...state, multiplex: v })} />
+      </Field>
+      <div className="panels">
+        <div className="panels-head"><span>NGS panel</span><span>Samples / run</span></div>
+        {state.panels.map((p, i) => (
+          <div className="panel-row" key={i}>
+            <select className="ctrl" value={p.name} onChange={e => setPanel(i, "name", e.target.value)}>
+              <option value="">{i === 0 ? "Select panel" : "(none)"}</option>
+              {bundleNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <input className="ctrl" type="number" min={0} value={p.samples}
+              onChange={e => setPanel(i, "samples", e.target.value === "" ? "" : Number(e.target.value))} />
+          </div>
+        ))}
+      </div>
+      <div className="grid2">
+        <Field label="Sequencer"><Select value={state.sequencer} onChange={setSeq} options={sequencerNames.length ? sequencerNames : [""]} /></Field>
+        <Field label="Flow cell"><Select value={state.flowcell} onChange={v => set({ ...state, flowcell: v })} options={flowOptions.length ? flowOptions : [""]} /></Field>
+        <Field label="Flow cell cost ($)"><Num value={state.flowcellCost} onChange={v => set({ ...state, flowcellCost: v })} step={10} /></Field>
+        <Field label="Runs per year"><Num value={state.runs} onChange={v => set({ ...state, runs: v })} /></Field>
+      </div>
+      <div className="readout">
+        <div className="readout-h">Technical output</div>
+        <div className="readout-grid">
+          <div className="rocell"><div className="l">Flow cells / run</div><div className="v num">{r.active ? r.fc : "-"}</div></div>
+          <div className="rocell"><div className="l">Flow cell coverage</div><div className="v num">{r.active ? pct1(r.coverage) : "-"}</div></div>
+          <div className="rocell"><div className="l">Run time (hrs)</div><div className="v num">{r.active ? r.runtime : "-"}</div></div>
+          <div className="rocell"><div className="l">Samples / year</div><div className="v num">{r.active ? r.samplesYear.toLocaleString("en-US") : "-"}</div></div>
+          <div className="rocell"><div className="l">M reads / flow cell</div><div className="v num">{r.active && r.readsFC ? r.readsFC.toLocaleString("en-US") : "-"}</div></div>
+          <div className="rocell"><div className="l">Cost / sample</div><div className="v num">{r.active ? usd2(r.costSample) : "-"}</div></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ OUTPUT TABLES ============================ */
+function FinRow({ label, cost, base, isCurrent, fmt = usd2 }) {
+  const delta = isCurrent ? null : (base - cost);
+  const pct = isCurrent ? null : (base ? 1 - cost / base : null);
+  const good = delta != null && delta > 0;
+  const bad = delta != null && delta < 0;
+  return (
+    <tr>
+      <td className="rl">{label}</td>
+      <td className="rn">{fmt(cost)}</td>
+      <td className={"rn" + (good ? " good" : bad ? " bad" : "")}>{isCurrent ? "-" : (delta >= 0 ? "+" : "") + fmt(delta)}</td>
+      <td className={"rn" + (good ? " good" : bad ? " bad" : "")}>{isCurrent ? "-" : pct1(pct)}</td>
+    </tr>
+  );
+}
+
+function NGSCalculator() {
+  const [bundles, setBundles] = useState(SEED_BUNDLES);
+  const [sequencers, setSequencers] = useState(SEED_SEQUENCERS);
+
+  const [current, setCurrent] = useState({
+    multiplex: "No", panels: [{ name: "TruSight Oncology 500", samples: 96 }, { name: "", samples: 0 }, { name: "", samples: 0 }],
+    sequencer: "NovaSeq 6000", flowcell: "S2", flowcellCost: 3000, runs: 20,
+  });
+  const [future, setFuture] = useState({
+    multiplex: "No", panels: [{ name: "TruSight Oncology 500", samples: 96 }, { name: "", samples: 0 }, { name: "", samples: 0 }],
+    sequencer: "NovaSeq X", flowcell: "25B", flowcellCost: 5000, runs: 20,
+  });
+  const [robot, setRobot] = useState({ enabled: "Yes", model: ROBOT_MODELS[1], price: 67960, volume: 2000, consumables: 5 });
+  const [seq, setSeq] = useState({ enabled: "No", model: "", price: 0, volume: 2000 });
+  const [tab, setTab] = useState("compare");
+  const [mplex, setMplex] = useState({
+    multiplex: "Yes",
+    panels: [{ name: "TruSight Oncology 500", samples: 48 }, { name: "", samples: 0 }, { name: "", samples: 0 }],
+    sequencer: "NovaSeq 6000", flowcell: "S4", runs: 12,
+  });
+
+  const bundleNames = bundles.map(b => b.name).filter(Boolean);
+  const bMap = useMemo(() => Object.fromEntries(bundles.map(b => [b.name, b])), [bundles]);
+  const seqMap = useMemo(() => Object.fromEntries(sequencers.map(s => [s.name, s])), [sequencers]);
+  const sequencerNames = sequencers.map(s => s.name);
+  const resolveFC = (seqName, fcName) => {
+    const f = (seqMap[seqName]?.flowcells || []).find(x => x.name === fcName);
+    return f ? { reads: Number(f.reads) || 0, runtime: Number(f.runtime) || 0 } : { reads: 0, runtime: 0 };
+  };
+
+  const resolvePanels = (st) => st.panels.map(p => {
+    const b = bMap[p.name];
+    return { name: p.name || "", samples: Number(p.samples) || 0, reads: b ? Number(b.reads) || 0 : null, price: b ? Number(b.price) || 0 : 0 };
+  });
+  const out = useMemo(() => {
+    const cf = resolveFC(current.sequencer, current.flowcell);
+    const ff = resolveFC(future.sequencer, future.flowcell);
+    return model({
+      curPanels: resolvePanels(current), curH: cf.reads, curRuntime: cf.runtime, C10: Number(current.flowcellCost) || 0, C11: Number(current.runs) || 0, C4: current.multiplex === "Yes",
+      futPanels: resolvePanels(future), futH: ff.reads, futRuntime: ff.runtime, C20: Number(future.flowcellCost) || 0, C21: Number(future.runs) || 0, C14: future.multiplex === "Yes",
+      C25: robot.enabled === "Yes", robotPrice: Number(robot.price) || 0, robotVol: Number(robot.volume) || 0, C28: Number(robot.consumables) || 0,
+      C33: seq.enabled === "Yes", seqPrice: Number(seq.price) || 0, seqVol: Number(seq.volume) || 0,
+    });
+  }, [current, future, robot, seq, bMap, seqMap]);
+
+  const mplexOut = useMemo(() => {
+    const fc = resolveFC(mplex.sequencer, mplex.flowcell);
+    const panels = mplex.panels.map(p => {
+      const b = bMap[p.name];
+      return { name: p.name || "", samples: Number(p.samples) || 0, reads: b ? Number(b.reads) || 0 : null, price: b ? Number(b.price) || 0 : 0 };
+    });
+    return { r: routine(panels, fc.reads, 0, Number(mplex.runs) || 0, mplex.multiplex === "Yes", fc.runtime), H: fc.reads, runtime: fc.runtime };
+  }, [mplex, bMap, seqMap]);
+
+  const compareChart = [
+    { name: "Current", v: out.K6, c: "#5b6b7a" },
+    { name: "Future", v: out.K10, c: "var(--teal)" },
+  ].filter(d => isFinite(d.v) && d.v > 0);
+  const combinedChart = [
+    { name: "Current", v: out.K6, c: "#5b6b7a" },
+    { name: "Future", v: out.K10, c: "var(--teal)" },
+    { name: "Total future", v: out.K22, c: "var(--accent2)" },
+  ].filter(d => isFinite(d.v) && d.v > 0);
+
+  const updateBundle = (i, key, v) => setBundles(bundles.map((b, idx) => idx === i ? { ...b, [key]: key === "name" ? v : (v === "" ? "" : Number(v)) } : b));
+  const addBundle = () => setBundles([...bundles, { name: "New panel", reads: 0, price: 0 }]);
+  const delBundle = (i) => setBundles(bundles.filter((_, idx) => idx !== i));
+  const updateSeqName = (si, name) => setSequencers(sequencers.map((s, i) => i === si ? { ...s, name } : s));
+  const addSequencer = () => setSequencers([...sequencers, { name: "New sequencer", flowcells: [] }]);
+  const delSequencer = (si) => setSequencers(sequencers.filter((_, i) => i !== si));
+  const addFlow = (si) => setSequencers(sequencers.map((s, i) => i === si ? { ...s, flowcells: [...s.flowcells, { name: "New flow cell", reads: 0, runtime: 0 }] } : s));
+  const updateFlow = (si, fi, key, v) => setSequencers(sequencers.map((s, i) => i === si ? { ...s, flowcells: s.flowcells.map((f, j) => j === fi ? { ...f, [key]: key === "name" ? v : (v === "" ? "" : Number(v)) } : f) } : s));
+  const delFlow = (si, fi) => setSequencers(sequencers.map((s, i) => i === si ? { ...s, flowcells: s.flowcells.filter((_, j) => j !== fi) } : s));
+
+  const css = `
+  *{box-sizing:border-box} 
+  .wrap{--bg:#0a0e14;--panel:#121821;--panel2:#0f141c;--line:#1f2935;--ink:#e6edf3;--mut:#8b9bb0;--teal:#36d6c3;--amber:#f2a65a;--accent2:#7aa2ff;--good:#3fe0a0;--bad:#ff7a85;
+    background:radial-gradient(1200px 600px at 15% -10%,#142031 0%,#0a0e14 55%);min-height:100vh;color:var(--ink);
+    font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;padding:0 0 40px;}
+  .num{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+  .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;padding:26px 30px 18px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(54,214,195,.06),transparent);}
+  .title{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:0;}
+  .title b{color:var(--teal);font-weight:600;}
+  .sub{color:var(--mut);font-size:13px;margin-top:4px;}
+  .credit{font-size:11.5px;color:var(--mut);font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap;}
+  .layout{display:grid;grid-template-columns:1.05fr 1fr;gap:18px;padding:22px 30px;}
+  @media(max-width:980px){.layout{grid-template-columns:1fr;}}
+  .col-h{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);margin:0 0 10px;font-weight:600;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 16px 18px;margin-bottom:16px;position:relative;overflow:hidden;}
+  .card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);}
+  .card-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;margin-bottom:14px;letter-spacing:.01em;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);}
+  .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;}
+  .field-label{font-size:12px;color:var(--mut);font-weight:500;}
+  .field-hint{display:block;font-style:normal;font-size:11px;color:var(--mut);opacity:.7;}
+  .ctrl{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:9px 10px;font-size:13px;width:100%;outline:none;transition:border .15s;font-family:inherit;}
+  .ctrl:focus{border-color:var(--teal);}
+  select.ctrl{appearance:none;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,var(--mut) 50%),linear-gradient(135deg,var(--mut) 50%,transparent 50%);background-position:calc(100% - 16px) 16px,calc(100% - 11px) 16px;background-size:5px 5px,5px 5px;background-repeat:no-repeat;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
+  .toggle{display:flex;gap:6px;}
+  .toggle-btn{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--mut);padding:8px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;transition:all .15s;font-family:inherit;}
+  .toggle-btn.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--ink);}
+  .panels{margin-bottom:12px;}
+  .panels-head{display:grid;grid-template-columns:1fr 110px;gap:10px;font-size:11px;color:var(--mut);margin-bottom:6px;padding:0 2px;}
+  .panel-row{display:grid;grid-template-columns:1fr 110px;gap:10px;margin-bottom:7px;}
+  .outpanel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px;}
+  .out-h{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);font-weight:600;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+  .out-h .bar{width:18px;height:2px;background:var(--teal);}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:6px;}
+  .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px 13px;}
+  .kpi .l{font-size:11px;color:var(--mut);margin-bottom:6px;}
+  .kpi .v{font-size:19px;font-weight:600;letter-spacing:-.01em;}
+  .kpi .v.good{color:var(--good);} .kpi .v.bad{color:var(--bad);}
+  table.fin{width:100%;border-collapse:collapse;margin-top:4px;}
+  table.fin th{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);text-align:right;padding:6px 8px;font-weight:600;border-bottom:1px solid var(--line);}
+  table.fin th:first-child{text-align:left;}
+  table.fin td{padding:8px;font-size:13px;border-bottom:1px solid rgba(31,41,53,.5);}
+  td.rl{color:var(--ink);} td.rn{text-align:right;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+  td.rn.good{color:var(--good);} td.rn.bad{color:var(--bad);}
+  .readout{margin-top:14px;padding-top:13px;border-top:1px dashed var(--line);}
+  .readout-h{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);font-weight:600;margin-bottom:9px;}
+  .readout-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .rocell{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 10px;}
+  .rocell .l{font-size:10px;color:var(--mut);line-height:1.3;} .rocell .v{font-size:15px;font-weight:600;margin-top:3px;}
+  .addon{display:grid;grid-template-columns:repeat(4,1fr);gap:0 12px;}
+  .price-chip{display:inline-flex;align-items:center;gap:7px;background:color-mix(in srgb,var(--teal) 12%,transparent);border:1px solid color-mix(in srgb,var(--teal) 35%,transparent);
+    border-radius:8px;padding:7px 11px;font-size:13px;margin-top:4px;}
+  .price-chip .tag{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--teal);}
+  .price-chip.invalid{background:color-mix(in srgb,var(--bad) 12%,transparent);border-color:color-mix(in srgb,var(--bad) 40%,transparent);}
+  .price-chip.invalid .tag{color:var(--bad);}
+  .section{margin:6px 30px 0;}
+  .disc{border:1px solid var(--line);border-radius:12px;background:var(--panel2);margin-top:14px;}
+  .disc summary{cursor:pointer;padding:13px 16px;font-size:13px;font-weight:600;color:var(--ink);list-style:none;display:flex;align-items:center;gap:9px;}
+  .disc summary::-webkit-details-marker{display:none;}
+  .disc summary .ic{color:var(--teal);}
+  .disc .body{padding:0 16px 16px;}
+  .dbtable{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .dbtable th{text-align:left;color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;padding:6px;border-bottom:1px solid var(--line);}
+  .dbtable td{padding:4px 6px;border-bottom:1px solid rgba(31,41,53,.4);}
+  .dbtable input{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 7px;font-size:12.5px;width:100%;font-family:inherit;}
+  .dbtable .num input{font-family:'IBM Plex Mono',monospace;}
+  .seqgroup{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-bottom:12px;background:var(--panel2);}
+  .seqgroup-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .seqname{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 10px;font-size:13.5px;font-weight:600;font-family:inherit;}
+  .seqgroup-head .delx{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;}
+  .btn{background:color-mix(in srgb,var(--teal) 16%,transparent);border:1px solid color-mix(in srgb,var(--teal) 40%,transparent);color:var(--teal);border-radius:8px;padding:7px 13px;font-size:12.5px;cursor:pointer;font-weight:600;font-family:inherit;}
+  .btn.ghost{background:transparent;border-color:var(--line);color:var(--mut);}
+  .delx{background:transparent;border:none;color:var(--bad);cursor:pointer;font-size:15px;opacity:.6;}
+  .delx:hover{opacity:1;}
+  .note{font-size:12.5px;color:var(--mut);line-height:1.65;}
+  .note b{color:var(--ink);font-weight:600;}
+  .badge{display:inline-block;font-size:10px;padding:2px 7px;border-radius:20px;border:1px solid var(--line);color:var(--mut);margin-left:6px;}
+  .badge.v{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent);}
+  .badge.f{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent);}
+  .foot{margin:26px 30px 0;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-size:11.5px;color:var(--mut);font-family:'IBM Plex Mono',monospace;flex-wrap:wrap;gap:8px;}
+  .chartwrap{height:170px;margin-top:6px;}
+  .ctip{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;}
+  .tabs{display:flex;gap:2px;padding:0 30px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(54,214,195,.04),transparent);flex-wrap:wrap;}
+  .tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);padding:13px 15px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px;transition:color .15s;}
+  .tab:hover{color:var(--ink);}
+  .tab.active{color:var(--ink);border-bottom-color:var(--teal);}
+  .tab .ix{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--teal);opacity:.85;}
+  .secthead{margin:22px 30px 0;font-size:13px;color:var(--mut);}
+  .secthead b{color:var(--ink);}
+  .mxbk{width:100%;border-collapse:collapse;margin-top:10px;}
+  .mxbk th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600;}
+  .mxbk th:first-child{text-align:left;}
+  .mxbk td{padding:7px 8px;font-size:12.5px;border-bottom:1px solid rgba(31,41,53,.5);text-align:right;}
+  .mxbk td:first-child{text-align:left;color:var(--ink);}
+  .mxbk td.n{font-family:'IBM Plex Mono',monospace;}
+  `;
+
+  const robotValid = out.robotPriceValid, seqValid = out.seqPriceValid;
+  const hasInputs = resolvePanels(current).some(p => p.name && p.samples > 0);
+  const curActive = hasInputs;
+  const futActive = resolvePanels(future).some(p => p.name && p.samples > 0);
+  const curReadout = { active: curActive, fc: out.cur_fc, coverage: out.cur_cov, runtime: out.cur_runtime, samplesYear: out.cur_samples_year, readsFC: out.cur_H, costSample: out.K4 };
+  const futReadout = { active: futActive, fc: out.fut_fc, coverage: out.fut_cov, runtime: out.fut_runtime, samplesYear: out.fut_samples_year, readsFC: out.fut_H, costSample: out.K8 };
+  const mplexFlowOpts = (seqMap[mplex.sequencer]?.flowcells || []).map(f => f.name);
+  const setMplexSeq = (s) => { const o = (seqMap[s]?.flowcells || []).map(f => f.name); setMplex({ ...mplex, sequencer: s, flowcell: o.includes(mplex.flowcell) ? mplex.flowcell : (o[0] || "") }); };
+  const setMplexPanel = (i, key, v) => setMplex({ ...mplex, panels: mplex.panels.map((p, idx) => idx === i ? { ...p, [key]: v } : p) });
+  const mplexActive = mplexOut.r.detail.some(d => d.samples > 0) && mplexOut.H > 0;
+  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Vendor"], ["database", "03", "Product database"], ["combined", "04", "Combined NGS costs"]];
+
+  return (
+    <div className="wrap">
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');${css}`}</style>
+
+      <div className="topbar">
+        <div>
+          <h1 className="title">NGS <b>Calculator</b></h1>
+          <div className="sub">Evaluate the multiplexing and economics of NGS panels for a given sequencer and flow cell</div>
+        </div>
+        <div className="credit">{COPYRIGHT}</div>
+      </div>
+
+      <div className="tabs">
+        {TABS.map(([id, ix, label]) => (
+          <button key={id} className={"tab" + (tab === id ? " active" : "")} onClick={() => setTab(id)}><span className="ix">{ix}</span>{label}</button>
+        ))}
+      </div>
+
+      {/* SECTION 1 - MULTIPLEXING */}
+      {tab === "multiplex" && (<>
+        <div className="secthead"><b>Multiplexing.</b> One or multiple panels in a single flow cell.</div>
+        <div className="layout">
+          <div>
+            <div className="col-h">Input</div>
+            <div className="card" style={{ "--accent": "var(--teal)" }}>
+              <div className="card-head"><span className="dot" /> Panels and flow cell</div>
+              <Field label="Multiplex panels on one flow cell?">
+                <Toggle value={mplex.multiplex} onChange={v => setMplex({ ...mplex, multiplex: v })} />
+              </Field>
+              <div className="panels">
+                <div className="panels-head"><span>NGS panel</span><span>Samples / run</span></div>
+                {mplex.panels.map((p, i) => (
+                  <div className="panel-row" key={i}>
+                    <select className="ctrl" value={p.name} onChange={e => setMplexPanel(i, "name", e.target.value)}>
+                      <option value="">{i === 0 ? "Select panel" : "(none)"}</option>
+                      {bundleNames.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <input className="ctrl" type="number" min={0} value={p.samples} onChange={e => setMplexPanel(i, "samples", e.target.value === "" ? "" : Number(e.target.value))} />
+                  </div>
+                ))}
+              </div>
+              <div className="grid2">
+                <Field label="Sequencer"><Select value={mplex.sequencer} onChange={setMplexSeq} options={sequencerNames.length ? sequencerNames : [""]} /></Field>
+                <Field label="Flow cell"><Select value={mplex.flowcell} onChange={v => setMplex({ ...mplex, flowcell: v })} options={mplexFlowOpts.length ? mplexFlowOpts : [""]} /></Field>
+                <Field label="Runs per year"><Num value={mplex.runs} onChange={v => setMplex({ ...mplex, runs: v })} /></Field>
+                <div />
+              </div>
+            </div>
+          </div>
+          <div>
+            <div className="col-h">Technical output</div>
+            <div className="outpanel">
+              <div className="out-h"><span className="bar" /> Coverage and flow cells</div>
+              {!mplexActive ? <div className="note">Add at least one panel with samples and pick a flow cell to see coverage.</div> : (<>
+                <div className="kpis">
+                  <div className="kpi"><div className="l">Total flow cell coverage</div><div className="v num">{pct1(mplexOut.r.coverage)}</div></div>
+                  <div className="kpi"><div className="l">Flow cells needed</div><div className="v num">{mplexOut.r.fc_needed}</div></div>
+                  <div className="kpi"><div className="l">Run time (hrs)</div><div className="v num">{mplexOut.r.run_time}</div></div>
+                </div>
+                <div className="note" style={{ margin: "2px 0 8px" }}>{mplex.multiplex === "Yes" ? "Multiplexed: panels share the flow cell. Flow cells needed is the ceiling of the summed coverage." : "Not multiplexed: each panel uses its own flow cells. Flow cells needed is the sum across panels."}</div>
+                <table className="mxbk">
+                  <thead><tr><th>Panel</th><th>Samples / run</th><th>M reads / sample</th><th>Coverage</th><th>Flow cells</th></tr></thead>
+                  <tbody>
+                    {mplexOut.r.detail.map((d, i) => (
+                      <tr key={i}><td>{d.name}</td><td className="n">{d.samples}</td><td className="n">{d.reads != null ? d.reads : "-"}</td><td className="n">{pct1(d.cov)}</td><td className="n">{mplex.multiplex === "Yes" ? "shared" : Math.ceil(d.cov)}</td></tr>
+                    ))}
+                    <tr><td><b>Total</b></td><td className="n">{mplexOut.r.detail.reduce((a, d) => a + d.samples, 0)}</td><td className="n">-</td><td className="n"><b>{pct1(mplexOut.r.coverage)}</b></td><td className="n"><b>{mplexOut.r.fc_needed}</b></td></tr>
+                  </tbody>
+                </table>
+                <div className="readout" style={{ marginTop: 14 }}>
+                  <div className="readout-grid">
+                    <div className="rocell"><div className="l">M reads / flow cell</div><div className="v num">{mplexOut.H ? mplexOut.H.toLocaleString("en-US") : "-"}</div></div>
+                    <div className="rocell"><div className="l">Samples / year</div><div className="v num">{mplexOut.r.samples_year.toLocaleString("en-US")}</div></div>
+                    <div className="rocell"><div className="l">Flow cell</div><div className="v">{mplex.flowcell || "-"}</div></div>
+                  </div>
+                </div>
+              </>)}
+            </div>
+          </div>
+        </div>
+      </>)}
+
+      {/* SECTION 2 - CURRENT VS FUTURE */}
+      {tab === "compare" && (<>
+        <div className="secthead"><b>Current vs Future Vendor.</b> Configure both vendors and compare cost per sample, per run and yearly, with savings. Each vendor shows its own technical output.</div>
+        <div className="layout">
+          <div>
+            <div className="col-h">Input</div>
+            <RoutineCard title="Current Vendor" accent="#5b6b7a" state={current} set={setCurrent} bundleNames={bundleNames} readout={curReadout} sequencerNames={sequencerNames} seqMap={seqMap} />
+            <RoutineCard title="Future Vendor" accent="var(--teal)" state={future} set={setFuture} bundleNames={bundleNames} readout={futReadout} sequencerNames={sequencerNames} seqMap={seqMap} />
+          </div>
+          <div>
+            <div className="col-h">Financial output</div>
+            <div className="outpanel">
+              <div className="out-h"><span className="bar" /> Current vs future vendor</div>
+              {!hasInputs ? <div className="note">Select at least one panel and enter samples per run to see results.</div> : (<>
+                <div className="kpis">
+                  <div className="kpi"><div className="l">Yearly savings</div><div className={"v num " + (out.yr_savings > 0 ? "good" : out.yr_savings < 0 ? "bad" : "")}>{usd0(out.yr_savings)}</div></div>
+                  <div className="kpi"><div className="l">Per-sample savings</div><div className={"v num " + (out.persample_savings > 0 ? "good" : out.persample_savings < 0 ? "bad" : "")}>{usd2(out.persample_savings)}</div></div>
+                  <div className="kpi"><div className="l">Future / sample</div><div className="v num">{usd2(out.K8)}</div></div>
+                </div>
+                <table className="fin">
+                  <thead><tr><th>Cost / sample</th><th>Amount</th><th>Delta vs current</th><th>Change</th></tr></thead>
+                  <tbody>
+                    <FinRow label="Current Vendor" cost={out.K4} base={out.K4} isCurrent />
+                    <FinRow label="Future Vendor" cost={out.K8} base={out.K4} />
+                  </tbody>
+                </table>
+                <table className="fin" style={{ marginTop: 14 }}>
+                  <thead><tr><th>Run cost (per run)</th><th>Amount</th><th>Delta vs current</th><th>Change</th></tr></thead>
+                  <tbody>
+                    <FinRow label="Current Vendor" cost={out.K5} base={out.K5} isCurrent fmt={usd0} />
+                    <FinRow label="Future Vendor" cost={out.K9} base={out.K5} fmt={usd0} />
+                  </tbody>
+                </table>
+                <table className="fin" style={{ marginTop: 14 }}>
+                  <thead><tr><th>Yearly cost</th><th>Amount</th><th>Delta vs current</th><th>Change</th></tr></thead>
+                  <tbody>
+                    <FinRow label="Current Vendor" cost={out.K6} base={out.K6} isCurrent fmt={usd0} />
+                    <FinRow label="Future Vendor" cost={out.K10} base={out.K6} fmt={usd0} />
+                  </tbody>
+                </table>
+                <div className="chartwrap">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={compareChart} margin={{ top: 14, right: 6, left: 6, bottom: 0 }}>
+                      <XAxis dataKey="name" tick={{ fill: "#8b9bb0", fontSize: 11 }} axisLine={{ stroke: "#1f2935" }} tickLine={false} />
+                      <YAxis tick={{ fill: "#8b9bb0", fontSize: 10 }} axisLine={false} tickLine={false} width={64} tickFormatter={v => "$" + (v / 1000).toFixed(0) + "k"} />
+                      <Tooltip content={({ active, payload, label }) => active && payload && payload.length ? <div className="ctip num">{label}: {usd0(payload[0].value)}</div> : null} cursor={{ fill: "rgba(255,255,255,.03)" }} />
+                      <Bar dataKey="v" radius={[5, 5, 0, 0]}>{compareChart.map((d, i) => <Cell key={i} fill={d.c} />)}</Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </>)}
+            </div>
+          </div>
+        </div>
+      </>)}
+
+      {/* SECTION 3 - PRODUCT DATABASE */}
+      {tab === "database" && (
+        <div className="section" style={{ marginTop: 22 }}>
+          <div className="secthead" style={{ margin: "0 0 6px" }}><b>Product database.</b> Add your NGS panels and their M reads per sample and price, edit flow-cell specs, or add custom items. Lookups across the whole tool update live.</div>
+          <div className="outpanel" style={{ marginTop: 14 }}>
+            <div className="out-h"><span className="bar" /> NGS panels</div>
+            <div className="note" style={{ marginBottom: 10 }}>TruSight Oncology 500 is provided as an example. Fill the empty rows with your own panels, or add more.</div>
+            <table className="dbtable">
+              <thead><tr><th>NGS panel</th><th style={{ width: 150 }}>M reads / sample</th><th style={{ width: 150 }}>Price ($)</th><th style={{ width: 36 }} /></tr></thead>
+              <tbody>
+                {bundles.map((b, i) => (
+                  <tr key={i}>
+                    <td><input value={b.name} onChange={e => updateBundle(i, "name", e.target.value)} /></td>
+                    <td className="num"><input type="number" value={b.reads} onChange={e => updateBundle(i, "reads", e.target.value)} /></td>
+                    <td className="num"><input type="number" value={b.price} onChange={e => updateBundle(i, "price", e.target.value)} /></td>
+                    <td><button className="delx" onClick={() => delBundle(i)} title="Remove">x</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ marginTop: 10 }}><button className="btn" onClick={addBundle}>+ Add panel</button></div>
+          </div>
+          <div className="outpanel">
+            <div className="out-h"><span className="bar" /> Sequencers and their flow cells</div>
+            <div className="note" style={{ marginBottom: 12 }}>Flow cells are grouped under the sequencer they run on. Edit reads or run time, add or remove flow cells within a sequencer, rename or remove a sequencer, or add a new one. Every routine and the multiplexing section pick their flow cell from the chosen sequencer's group.</div>
+            {sequencers.map((s, si) => (
+              <div className="seqgroup" key={si}>
+                <div className="seqgroup-head">
+                  <input className="seqname" value={s.name} onChange={e => updateSeqName(si, e.target.value)} />
+                  <button className="delx" onClick={() => delSequencer(si)} title="Remove sequencer">remove</button>
+                </div>
+                <table className="dbtable">
+                  <thead><tr><th>Flow cell</th><th style={{ width: 150 }}>M reads / flow cell</th><th style={{ width: 150 }}>Run time (hrs)</th><th style={{ width: 36 }} /></tr></thead>
+                  <tbody>
+                    {s.flowcells.map((f, fi) => (
+                      <tr key={fi}>
+                        <td><input value={f.name} onChange={e => updateFlow(si, fi, "name", e.target.value)} /></td>
+                        <td className="num"><input type="number" value={f.reads} onChange={e => updateFlow(si, fi, "reads", e.target.value)} /></td>
+                        <td className="num"><input type="number" value={f.runtime} onChange={e => updateFlow(si, fi, "runtime", e.target.value)} /></td>
+                        <td><button className="delx" onClick={() => delFlow(si, fi)} title="Remove">x</button></td>
+                      </tr>
+                    ))}
+                    {s.flowcells.length === 0 && <tr><td colSpan={4} className="note" style={{ padding: "8px 6px" }}>No flow cells yet. Add one below.</td></tr>}
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 8 }}><button className="btn ghost" onClick={() => addFlow(si)}>+ Add flow cell to {s.name || "this sequencer"}</button></div>
+              </div>
+            ))}
+            <div style={{ marginTop: 12 }}><button className="btn" onClick={addSequencer}>+ Add sequencer</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 4 - COMBINED NGS COSTS */}
+      {tab === "combined" && (<>
+        <div className="secthead"><b>Combined NGS costs.</b> Add a liquid-handling robot and/or a sequencer by entering its total price and the annual sample volume. The per-sample cost is the total price divided by that volume. This uses the future vendor defined in the Current vs Future Vendor section.</div>
+        <div className="layout">
+          <div>
+            <div className="col-h">Add-ons</div>
+            <div className="card" style={{ "--accent": "var(--amber)" }}>
+              <div className="card-head"><span className="dot" /> Liquid-handling robot</div>
+              <Field label="Include a robot?"><Toggle value={robot.enabled} onChange={v => setRobot({ ...robot, enabled: v })} /></Field>
+              {robot.enabled === "Yes" && (<>
+                <div className="addon">
+                  <Field label="Robot model"><Select value={robot.model} onChange={v => setRobot({ ...robot, model: v })} options={ROBOT_MODELS} /></Field>
+                  <Field label="Total price ($)"><Num value={robot.price} onChange={v => setRobot({ ...robot, price: v })} step={1000} /></Field>
+                  <Field label="Annual sample volume"><Num value={robot.volume} onChange={v => setRobot({ ...robot, volume: v })} step={100} /></Field>
+                  <Field label="Consumables ($ / sample)"><Num value={robot.consumables} onChange={v => setRobot({ ...robot, consumables: v })} /></Field>
+                </div>
+                <div className={"price-chip" + (robotValid ? "" : " invalid")}>
+                  <span className="tag">price / volume</span>
+                  <span className="num">{robotValid ? usd2(out.C27) + " / sample" : "Enter annual sample volume"}</span>
+                </div>
+              </>)}
+            </div>
+            <div className="card" style={{ "--accent": "var(--accent2)" }}>
+              <div className="card-head"><span className="dot" /> Sequencer</div>
+              <Field label="Include a sequencer?"><Toggle value={seq.enabled} onChange={v => setSeq({ ...seq, enabled: v })} /></Field>
+              {seq.enabled === "Yes" && (<>
+                <div className="addon">
+                  <Field label="Sequencer"><Select value={seq.model || (sequencerNames[0] || "")} onChange={v => setSeq({ ...seq, model: v })} options={sequencerNames.length ? sequencerNames : [""]} /></Field>
+                  <Field label="Total price ($)"><Num value={seq.price} onChange={v => setSeq({ ...seq, price: v })} step={1000} /></Field>
+                  <Field label="Annual sample volume"><Num value={seq.volume} onChange={v => setSeq({ ...seq, volume: v })} step={100} /></Field>
+                  <div />
+                </div>
+                <div className={"price-chip" + (seqValid ? "" : " invalid")}>
+                  <span className="tag">price / volume</span>
+                  <span className="num">{seqValid ? usd2(out.C35) + " / sample" : "Enter annual sample volume"}</span>
+                </div>
+              </>)}
+            </div>
+          </div>
+          <div>
+            <div className="col-h">Combined output</div>
+            <div className="outpanel">
+              <div className="out-h"><span className="bar" /> Per-sample add-on cost</div>
+              <div className="kpis">
+                <div className="kpi"><div className="l">Robot / sample</div><div className="v num">{robot.enabled === "Yes" ? (robotValid ? usd2(out.C27) : "n/a") : "-"}</div></div>
+                <div className="kpi"><div className="l">Sequencer / sample</div><div className="v num">{seq.enabled === "Yes" ? (seqValid ? usd2(out.C35) : "n/a") : "-"}</div></div>
+                <div className="kpi"><div className="l">Total future / sample</div><div className="v num">{usd2(out.K20)}</div></div>
+              </div>
+            </div>
+            <div className="outpanel">
+              <div className="out-h"><span className="bar" /> Total future vendor vs current</div>
+              {!hasInputs ? <div className="note">Define the future vendor in the Current vs Future Vendor section to see combined costs.</div> : (<>
+                <table className="fin">
+                  <thead><tr><th>Cost / sample</th><th>Amount</th><th>Delta vs current</th><th>Change</th></tr></thead>
+                  <tbody>
+                    <FinRow label="Current Vendor" cost={out.K4} base={out.K4} isCurrent />
+                    <FinRow label="Future Vendor" cost={out.K8} base={out.K4} />
+                    {robot.enabled === "Yes" && <FinRow label="Future + robot" cost={out.K12} base={out.K4} />}
+                    {seq.enabled === "Yes" && <FinRow label="Future + sequencer" cost={out.K8 + (seqValid ? out.C35 : 0)} base={out.K4} />}
+                    <FinRow label="Total future Vendor" cost={out.K20} base={out.K4} />
+                  </tbody>
+                </table>
+                <table className="fin" style={{ marginTop: 14 }}>
+                  <thead><tr><th>Yearly cost</th><th>Amount</th><th>Delta vs current</th><th>Change</th></tr></thead>
+                  <tbody>
+                    <FinRow label="Current Vendor" cost={out.K6} base={out.K6} isCurrent fmt={usd0} />
+                    <FinRow label="Future Vendor" cost={out.K10} base={out.K6} fmt={usd0} />
+                    <FinRow label="Total future Vendor" cost={out.K22} base={out.K6} fmt={usd0} />
+                  </tbody>
+                </table>
+                <div className="chartwrap">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={combinedChart} margin={{ top: 14, right: 6, left: 6, bottom: 0 }}>
+                      <XAxis dataKey="name" tick={{ fill: "#8b9bb0", fontSize: 11 }} axisLine={{ stroke: "#1f2935" }} tickLine={false} />
+                      <YAxis tick={{ fill: "#8b9bb0", fontSize: 10 }} axisLine={false} tickLine={false} width={64} tickFormatter={v => "$" + (v / 1000).toFixed(0) + "k"} />
+                      <Tooltip content={({ active, payload, label }) => active && payload && payload.length ? <div className="ctip num">{label}: {usd0(payload[0].value)}</div> : null} cursor={{ fill: "rgba(255,255,255,.03)" }} />
+                      <Bar dataKey="v" radius={[5, 5, 0, 0]}>{combinedChart.map((d, i) => <Cell key={i} fill={d.c} />)}</Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </>)}
+            </div>
+          </div>
+        </div>
+      </>)}
+
+      <div className="foot">
+        <span>{COPYRIGHT}</span>
+        {tab === "combined" && <span>Robot and sequencer per-sample cost = total price / annual sample volume</span>}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(NGSCalculator));
+
+</script>
+</body>
+</html>
