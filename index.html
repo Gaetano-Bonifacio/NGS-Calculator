@@ -1,18 +1,12 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>NGS Calculator | Prepared by Gaetano Bonifacio PhD, MBA | 2026</title>
-<meta name="description" content="Interactive NGS panel multiplexing and cost calculator. Prepared by Gaetano Bonifacio PhD, MBA, 2026." />
-<style>
-  html, body { margin: 0; padding: 0; background: #0a0e14; }
-  #root { min-height: 100vh; }
-  #boot { color: #8b9bb0; font-family: ui-sans-serif, system-ui, sans-serif; padding: 40px 30px; font-size: 14px; }
-  #boot b { color: #36d6c3; }
-  #err { display: none; color: #ff7a85; font-family: ui-monospace, monospace; padding: 20px 30px; white-space: pre-wrap; font-size: 12.5px; }
-</style>
-<!-- Pinned CDN dependencies. Order matters: React and PropTypes must load before Recharts. -->
+<title>NGS Calculator</title>
+<meta name="author" content="Gaetano Bonifacio" />
+<meta name="description" content="Interactive NGS cost and multiplexing calculator. Prepared by Gaetano Bonifacio PhD, MBA | 2026" />
+<style>html,body{margin:0;padding:0;background:#0a0e14;}#root{min-height:100vh;}</style>
 <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
@@ -20,33 +14,28 @@
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 </head>
 <body>
-<div id="root"><div id="boot">Loading <b>NGS Calculator</b> ...</div></div>
-<pre id="err"></pre>
+<div id="root"></div>
 <script>
-  // Guardrail: surface a clear message if a CDN dependency failed to load,
-  // instead of a blank page.
-  window.addEventListener("DOMContentLoaded", function () {
-    var missing = [];
-    if (typeof React === "undefined") missing.push("React");
-    if (typeof ReactDOM === "undefined") missing.push("ReactDOM");
-    if (typeof Recharts === "undefined") missing.push("Recharts");
-    if (typeof Babel === "undefined") missing.push("Babel");
-    if (missing.length) {
-      var e = document.getElementById("err");
-      e.style.display = "block";
-      e.textContent = "Could not load: " + missing.join(", ") +
-        ". A content-delivery network may be blocked on this network. Try another network or open the file with internet access.";
-    }
-  });
-  window.addEventListener("error", function (ev) {
-    var e = document.getElementById("err");
-    if (e) { e.style.display = "block"; e.textContent = "Render error: " + (ev.message || ev.error || ev); }
-  });
+window.addEventListener("load", function () {
+  var missing = [];
+  if (!window.React) missing.push("React");
+  if (!window.ReactDOM) missing.push("ReactDOM");
+  if (!window.Recharts) missing.push("Recharts");
+  if (!window.Babel) missing.push("Babel");
+  var root = document.getElementById("root");
+  if (missing.length && root && !root.hasChildNodes()) {
+    root.innerHTML = '<div style="color:#e6edf3;font-family:sans-serif;max-width:640px;margin:0 auto;padding:48px 24px;">' +
+      '<h2 style="font-weight:600;">The calculator could not load</h2>' +
+      '<p style="color:#8b9bb0;line-height:1.6;">These libraries failed to load from their CDN: <b style="color:#e6edf3;">' +
+      missing.join(", ") + '</b>. This usually means a network is blocking the CDN. ' +
+      'Reconnect, or allow unpkg.com and cdn.jsdelivr.net, then refresh the page.</p></div>';
+  }
+});
 </script>
-<script type="text/babel" data-presets="react" data-type="module">
-
+<script type="text/babel" data-presets="react">
 const { useState, useMemo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } = Recharts;
+
 
 /* =========================================================================
    VERIFIED CALCULATION LOGIC
@@ -87,12 +76,21 @@ function model(inp) {
   const num = v => typeof v === "number" && !isNaN(v);
   const c27 = num(C27) ? C27 : 0, c35 = num(C35) ? C35 : 0;
   const C28 = inp.C28, sumD = inp.futPanels.reduce((a, p) => a + (p.name ? p.samples : 0), 0);
+  // Resequencing: a failure rate applied to the sequencing cost / sample (current K4, future K8).
+  // Per sample: reseq = failure rate x cost / sample. Yearly: failure rate x yearly sequencing cost.
+  const reseqOn = inp.C40;
+  const fCur = reseqOn ? (inp.curFail || 0) : 0, fFut = reseqOn ? (inp.futFail || 0) : 0;
+  const reseqCur = fCur * K4, reseqFut = fFut * K8;
+  const reseqCurYear = fCur * K6, reseqFutYear = fFut * K10;
+  const curPlusReseq = K4 + reseqCur, futPlusReseq = K8 + reseqFut;
+  const curPlusReseqYear = K6 + reseqCurYear, futPlusReseqYear = K10 + reseqFutYear;
   const K12 = (K8 + (robotOn ? c27 : 0)) + C28;
-  const K20 = K8 + (robotOn ? c27 + C28 : 0) + (seqOn ? c35 : 0);
+  const K20 = K8 + reseqFut + (robotOn ? c27 + C28 : 0) + (seqOn ? c35 : 0);
   const K21 = K9 + (robotOn ? (c27 + C28) * sumD : 0) + (seqOn ? c35 * sumD : 0);
-  const K22 = K10 + (robotOn ? (c27 + C28) * sumD * inp.C21 : 0) + (seqOn ? c35 * sumD * inp.C21 : 0);
+  const K22 = K10 + reseqFutYear + (robotOn ? (c27 + C28) * sumD * inp.C21 : 0) + (seqOn ? c35 * sumD * inp.C21 : 0);
   return {
     K4, K5, K6, K8, K9, K10, C27, C35, K12, K20, K21, K22,
+    reseqCur, reseqFut, reseqCurYear, reseqFutYear, curPlusReseq, futPlusReseq, curPlusReseqYear, futPlusReseqYear,
     robotPriceValid: !robotOn || num(C27), seqPriceValid: !seqOn || num(C35),
     cur_fc: cur.fc_needed, fut_fc: fut.fc_needed, cur_runtime: cur.run_time, fut_runtime: fut.run_time,
     cur_cov: cur.coverage, fut_cov: fut.coverage,
@@ -242,6 +240,7 @@ function NGSCalculator() {
   });
   const [robot, setRobot] = useState({ enabled: "Yes", model: ROBOT_MODELS[1], price: 67960, volume: 2000, consumables: 5 });
   const [seq, setSeq] = useState({ enabled: "No", model: "", price: 0, volume: 2000 });
+  const [reseq, setReseq] = useState({ enabled: "No", curRate: 5, futRate: 5 });
   const [tab, setTab] = useState("compare");
   const [mplex, setMplex] = useState({
     multiplex: "Yes",
@@ -270,8 +269,9 @@ function NGSCalculator() {
       futPanels: resolvePanels(future), futH: ff.reads, futRuntime: ff.runtime, C20: Number(future.flowcellCost) || 0, C21: Number(future.runs) || 0, C14: future.multiplex === "Yes",
       C25: robot.enabled === "Yes", robotPrice: Number(robot.price) || 0, robotVol: Number(robot.volume) || 0, C28: Number(robot.consumables) || 0,
       C33: seq.enabled === "Yes", seqPrice: Number(seq.price) || 0, seqVol: Number(seq.volume) || 0,
+      C40: reseq.enabled === "Yes", curFail: (Number(reseq.curRate) || 0) / 100, futFail: (Number(reseq.futRate) || 0) / 100,
     });
-  }, [current, future, robot, seq, bMap, seqMap]);
+  }, [current, future, robot, seq, reseq, bMap, seqMap]);
 
   const mplexOut = useMemo(() => {
     const fc = resolveFC(mplex.sequencer, mplex.flowcell);
@@ -606,7 +606,7 @@ function NGSCalculator() {
 
       {/* SECTION 4 - COMBINED NGS COSTS */}
       {tab === "combined" && (<>
-        <div className="secthead"><b>Combined NGS costs.</b> Add a liquid-handling robot and/or a sequencer by entering its total price and the annual sample volume. The per-sample cost is the total price divided by that volume. This uses the future vendor defined in the Current vs Future Vendor section.</div>
+        <div className="secthead"><b>Combined NGS costs.</b> Add a liquid-handling robot and/or a sequencer by entering its total price and the annual sample volume. The per-sample cost is the total price divided by that volume. Add resequencing as a failure rate applied to the cost / sample of each vendor. This uses the future vendor defined in the Current vs Future Vendor section.</div>
         <div className="layout">
           <div>
             <div className="col-h">Add-ons</div>
@@ -642,6 +642,20 @@ function NGSCalculator() {
                 </div>
               </>)}
             </div>
+            <div className="card" style={{ "--accent": "var(--bad)" }}>
+              <div className="card-head"><span className="dot" /> Resequencing</div>
+              <Field label="Include resequencing?"><Toggle value={reseq.enabled} onChange={v => setReseq({ ...reseq, enabled: v })} /></Field>
+              {reseq.enabled === "Yes" && (<>
+                <div className="grid2">
+                  <Field label="Current failure rate (%)" hint="of current cost / sample"><Num value={reseq.curRate} onChange={v => setReseq({ ...reseq, curRate: v })} step={0.5} /></Field>
+                  <Field label="Future failure rate (%)" hint="of future cost / sample"><Num value={reseq.futRate} onChange={v => setReseq({ ...reseq, futRate: v })} step={0.5} /></Field>
+                </div>
+                <div className="price-chip">
+                  <span className="tag">reseq / sample</span>
+                  <span className="num">cur {usd2(out.reseqCur)} &middot; fut {usd2(out.reseqFut)}</span>
+                </div>
+              </>)}
+            </div>
           </div>
           <div>
             <div className="col-h">Combined output</div>
@@ -652,6 +666,13 @@ function NGSCalculator() {
                 <div className="kpi"><div className="l">Sequencer / sample</div><div className="v num">{seq.enabled === "Yes" ? (seqValid ? usd2(out.C35) : "n/a") : "-"}</div></div>
                 <div className="kpi"><div className="l">Total future / sample</div><div className="v num">{usd2(out.K20)}</div></div>
               </div>
+              {reseq.enabled === "Yes" && (
+                <div className="kpis" style={{ marginTop: 12 }}>
+                  <div className="kpi"><div className="l">Current reseq / sample</div><div className="v num">{usd2(out.reseqCur)}</div></div>
+                  <div className="kpi"><div className="l">Future reseq / sample</div><div className="v num">{usd2(out.reseqFut)}</div></div>
+                  <div className="kpi"><div className="l">Future + reseq / sample</div><div className="v num">{usd2(out.futPlusReseq)}</div></div>
+                </div>
+              )}
             </div>
             <div className="outpanel">
               <div className="out-h"><span className="bar" /> Total future vendor vs current</div>
@@ -660,7 +681,9 @@ function NGSCalculator() {
                   <thead><tr><th>Cost / sample</th><th>Amount</th><th>Delta vs current</th><th>Change</th></tr></thead>
                   <tbody>
                     <FinRow label="Current Vendor" cost={out.K4} base={out.K4} isCurrent />
+                    {reseq.enabled === "Yes" && <FinRow label="Current + resequencing" cost={out.curPlusReseq} base={out.K4} />}
                     <FinRow label="Future Vendor" cost={out.K8} base={out.K4} />
+                    {reseq.enabled === "Yes" && <FinRow label="Future + resequencing" cost={out.futPlusReseq} base={out.K4} />}
                     {robot.enabled === "Yes" && <FinRow label="Future + robot" cost={out.K12} base={out.K4} />}
                     {seq.enabled === "Yes" && <FinRow label="Future + sequencer" cost={out.K8 + (seqValid ? out.C35 : 0)} base={out.K4} />}
                     <FinRow label="Total future Vendor" cost={out.K20} base={out.K4} />
@@ -670,7 +693,9 @@ function NGSCalculator() {
                   <thead><tr><th>Yearly cost</th><th>Amount</th><th>Delta vs current</th><th>Change</th></tr></thead>
                   <tbody>
                     <FinRow label="Current Vendor" cost={out.K6} base={out.K6} isCurrent fmt={usd0} />
+                    {reseq.enabled === "Yes" && <FinRow label="Current + resequencing" cost={out.curPlusReseqYear} base={out.K6} fmt={usd0} />}
                     <FinRow label="Future Vendor" cost={out.K10} base={out.K6} fmt={usd0} />
+                    {reseq.enabled === "Yes" && <FinRow label="Future + resequencing" cost={out.futPlusReseqYear} base={out.K6} fmt={usd0} />}
                     <FinRow label="Total future Vendor" cost={out.K22} base={out.K6} fmt={usd0} />
                   </tbody>
                 </table>
@@ -692,11 +717,17 @@ function NGSCalculator() {
 
       <div className="foot">
         <span>{COPYRIGHT}</span>
-        {tab === "combined" && <span>Robot and sequencer per-sample cost = total price / annual sample volume</span>}
+        {tab === "combined" && <span>Per-sample add-on = total price / annual volume &middot; resequencing = failure rate x cost / sample</span>}
       </div>
     </div>
   );
 }
+
+function Quirk() {
+  return null;
+}
+
+
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(NGSCalculator));
