@@ -1,4 +1,5 @@
 # NGS Calculator
+<img width="1774" height="887" alt="ChatGPT Image Jun 11, 2026, 08_56_26 AM" src="https://github.com/user-attachments/assets/ae78fa8f-0e7d-4e32-9425-9929ed88d8ec" />
 
 A single-file, browser-based calculator for evaluating the multiplexing and economics of next-generation sequencing (NGS) panels on a given sequencer and flow cell. It is built for teams comparing sequencing vendor economics and panel multiplexing decisions.
 
