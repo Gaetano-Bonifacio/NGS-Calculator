@@ -5,6 +5,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
    VERIFIED CALCULATION LOGIC
    Routine economics checked against LibreOffice recalc + hand derivation.
    Robot and sequencer per-sample cost = total price / annual sample volume.
+   Data analysis = optional cost on the current and/or future vendor, entered as
+   an annual fee (per-sample equivalent = fee / that vendor's annual volume) or a
+   cost per sample (yearly = cost x that vendor's annual volume).
    ========================================================================= */
 const ROBOT_MODELS = ["STAR (Hamilton)", "STARlet (Hamilton)", "Biomek i5 (Beckman Coulter)", "Biomek i7 (Beckman Coulter)", "Fontus (Revvity)"];
 
@@ -48,13 +51,31 @@ function model(inp) {
   const reseqCurYear = fCur * K6, reseqFutYear = fFut * K10;
   const curPlusReseq = K4 + reseqCur, futPlusReseq = K8 + reseqFut;
   const curPlusReseqYear = K6 + reseqCurYear, futPlusReseqYear = K10 + reseqFutYear;
+  // Data analysis: an optional cost on the current and/or future vendor, entered as
+  // an annual fee (per-sample equivalent = fee / that vendor's annual volume) or a
+  // cost per sample (yearly = cost x that vendor's annual volume). Either side can be 0.
+  // Only the future side feeds the total future figures (K20/K22); the current side
+  // is shown as a "Current + data analysis" comparison line.
+  const dataOn = inp.C45, dMode = inp.dataMode, futVol = fut.samples_year, curVol = cur.samples_year;
+  const dCurPer = inp.dataCurPer || 0, dFutPer = inp.dataFutPer || 0;
+  const dCurAnn = inp.dataCurAnnual || 0, dFutAnn = inp.dataFutAnnual || 0;
+  const dataCurPerSample = dataOn ? (dMode === "annual" ? (curVol > 0 ? dCurAnn / curVol : 0) : dCurPer) : 0;
+  const dataFutPerSample = dataOn ? (dMode === "annual" ? (futVol > 0 ? dFutAnn / futVol : 0) : dFutPer) : 0;
+  const dataCurYear = dataOn ? (dMode === "annual" ? dCurAnn : dCurPer * curVol) : 0;
+  const dataFutYear = dataOn ? (dMode === "annual" ? dFutAnn : dFutPer * futVol) : 0;
+  const dataCurValid = !dataOn || dMode !== "annual" || curVol > 0;
+  const dataFutValid = !dataOn || dMode !== "annual" || futVol > 0;
+  const curPlusData = K4 + dataCurPerSample, futPlusData = K8 + dataFutPerSample;
+  const curPlusDataYear = K6 + dataCurYear, futPlusDataYear = K10 + dataFutYear;
   const K12 = (K8 + (robotOn ? c27 : 0)) + C28;
-  const K20 = K8 + reseqFut + (robotOn ? c27 + C28 : 0) + (seqOn ? c35 : 0);
+  const K20 = K8 + reseqFut + dataFutPerSample + (robotOn ? c27 + C28 : 0) + (seqOn ? c35 : 0);
   const K21 = K9 + (robotOn ? (c27 + C28) * sumD : 0) + (seqOn ? c35 * sumD : 0);
-  const K22 = K10 + reseqFutYear + (robotOn ? (c27 + C28) * sumD * inp.C21 : 0) + (seqOn ? c35 * sumD * inp.C21 : 0);
+  const K22 = K10 + reseqFutYear + dataFutYear + (robotOn ? (c27 + C28) * sumD * inp.C21 : 0) + (seqOn ? c35 * sumD * inp.C21 : 0);
   return {
     K4, K5, K6, K8, K9, K10, C27, C35, K12, K20, K21, K22,
     reseqCur, reseqFut, reseqCurYear, reseqFutYear, curPlusReseq, futPlusReseq, curPlusReseqYear, futPlusReseqYear,
+    dataCurPerSample, dataFutPerSample, dataCurYear, dataFutYear, dataCurValid, dataFutValid,
+    curPlusData, futPlusData, curPlusDataYear, futPlusDataYear, futVol, curVol,
     robotPriceValid: !robotOn || num(C27), seqPriceValid: !seqOn || num(C35),
     cur_fc: cur.fc_needed, fut_fc: fut.fc_needed, cur_runtime: cur.run_time, fut_runtime: fut.run_time,
     cur_cov: cur.coverage, fut_cov: fut.coverage,
@@ -111,10 +132,10 @@ function Num({ value, onChange, step = 1, min = 0 }) {
   return <input className="ctrl" type="number" step={step} min={min} value={value}
     onChange={e => onChange(e.target.value === "" ? "" : Number(e.target.value))} />;
 }
-function Toggle({ value, onChange }) {
+function Toggle({ value, onChange, options = ["Yes", "No"] }) {
   return (
     <div className="toggle">
-      {["Yes", "No"].map(v => (
+      {options.map(v => (
         <button key={v} className={"toggle-btn" + (value === v ? " on" : "")} onClick={() => onChange(v)}>{v}</button>
       ))}
     </div>
@@ -205,6 +226,7 @@ export default function NGSCalculator() {
   const [robot, setRobot] = useState({ enabled: "Yes", model: ROBOT_MODELS[1], price: 67960, volume: 2000, consumables: 5 });
   const [seq, setSeq] = useState({ enabled: "No", model: "", price: 0, volume: 2000 });
   const [reseq, setReseq] = useState({ enabled: "No", curRate: 5, futRate: 5 });
+  const [data, setData] = useState({ enabled: "No", mode: "Annual fee", curAnnual: 50000, futAnnual: 50000, curPer: 20, futPer: 20 });
   const [tab, setTab] = useState("compare");
   const [mplex, setMplex] = useState({
     multiplex: "Yes",
@@ -234,8 +256,11 @@ export default function NGSCalculator() {
       C25: robot.enabled === "Yes", robotPrice: Number(robot.price) || 0, robotVol: Number(robot.volume) || 0, C28: Number(robot.consumables) || 0,
       C33: seq.enabled === "Yes", seqPrice: Number(seq.price) || 0, seqVol: Number(seq.volume) || 0,
       C40: reseq.enabled === "Yes", curFail: (Number(reseq.curRate) || 0) / 100, futFail: (Number(reseq.futRate) || 0) / 100,
+      C45: data.enabled === "Yes", dataMode: data.mode === "Annual fee" ? "annual" : "persample",
+      dataCurAnnual: Number(data.curAnnual) || 0, dataFutAnnual: Number(data.futAnnual) || 0,
+      dataCurPer: Number(data.curPer) || 0, dataFutPer: Number(data.futPer) || 0,
     });
-  }, [current, future, robot, seq, reseq, bMap, seqMap]);
+  }, [current, future, robot, seq, reseq, data, bMap, seqMap]);
 
   const mplexOut = useMemo(() => {
     const fc = resolveFC(mplex.sequencer, mplex.flowcell);
@@ -268,7 +293,7 @@ export default function NGSCalculator() {
 
   const css = `
   *{box-sizing:border-box} 
-  .wrap{--bg:#0a0e14;--panel:#121821;--panel2:#0f141c;--line:#1f2935;--ink:#e6edf3;--mut:#8b9bb0;--teal:#36d6c3;--amber:#f2a65a;--accent2:#7aa2ff;--good:#3fe0a0;--bad:#ff7a85;
+  .wrap{--bg:#0a0e14;--panel:#121821;--panel2:#0f141c;--line:#1f2935;--ink:#e6edf3;--mut:#8b9bb0;--teal:#36d6c3;--amber:#f2a65a;--accent2:#7aa2ff;--violet:#a78bfa;--good:#3fe0a0;--bad:#ff7a85;
     background:radial-gradient(1200px 600px at 15% -10%,#142031 0%,#0a0e14 55%);min-height:100vh;color:var(--ink);
     font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;padding:0 0 40px;}
   .num{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
@@ -375,6 +400,8 @@ export default function NGSCalculator() {
   const setMplexSeq = (s) => { const o = (seqMap[s]?.flowcells || []).map(f => f.name); setMplex({ ...mplex, sequencer: s, flowcell: o.includes(mplex.flowcell) ? mplex.flowcell : (o[0] || "") }); };
   const setMplexPanel = (i, key, v) => setMplex({ ...mplex, panels: mplex.panels.map((p, idx) => idx === i ? { ...p, [key]: v } : p) });
   const mplexActive = mplexOut.r.detail.some(d => d.samples > 0) && mplexOut.H > 0;
+  const dataChipValid = out.dataCurValid && out.dataFutValid;
+  const dataChip = "cur " + usd2(out.dataCurPerSample) + " \u00b7 fut " + usd2(out.dataFutPerSample) + " / sample";
   const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Vendor"], ["database", "03", "Product database"], ["combined", "04", "Combined NGS costs"]];
 
   return (
@@ -570,7 +597,7 @@ export default function NGSCalculator() {
 
       {/* SECTION 4 - COMBINED NGS COSTS */}
       {tab === "combined" && (<>
-        <div className="secthead"><b>Combined NGS costs.</b> Add a liquid-handling robot and/or a sequencer by entering its total price and the annual sample volume. The per-sample cost is the total price divided by that volume. Add resequencing as a failure rate applied to the cost / sample of each vendor. This uses the future vendor defined in the Current vs Future Vendor section.</div>
+        <div className="secthead"><b>Combined NGS costs.</b> Add a liquid-handling robot and/or a sequencer by entering its total price and the annual sample volume. The per-sample cost is the total price divided by that volume. Add resequencing as a failure rate applied to the cost / sample of each vendor. Add an optional data-analysis cost, as an annual fee or a cost per sample, to the current and/or future vendor (either side can be 0). This uses the future vendor defined in the Current vs Future Vendor section.</div>
         <div className="layout">
           <div>
             <div className="col-h">Add-ons</div>
@@ -620,6 +647,28 @@ export default function NGSCalculator() {
                 </div>
               </>)}
             </div>
+            <div className="card" style={{ "--accent": "var(--violet)" }}>
+              <div className="card-head"><span className="dot" /> Data analysis</div>
+              <Field label="Include data analysis?"><Toggle value={data.enabled} onChange={v => setData({ ...data, enabled: v })} /></Field>
+              {data.enabled === "Yes" && (<>
+                <Field label="Cost model">
+                  <Toggle value={data.mode} onChange={v => setData({ ...data, mode: v })} options={["Annual fee", "Per sample"]} />
+                </Field>
+                {data.mode === "Annual fee"
+                  ? <div className="grid2">
+                      <Field label="Current annual fee ($)" hint="0 to skip current"><Num value={data.curAnnual} onChange={v => setData({ ...data, curAnnual: v })} step={1000} /></Field>
+                      <Field label="Future annual fee ($)" hint="0 to skip future"><Num value={data.futAnnual} onChange={v => setData({ ...data, futAnnual: v })} step={1000} /></Field>
+                    </div>
+                  : <div className="grid2">
+                      <Field label="Current ($ / sample)" hint="0 to skip current"><Num value={data.curPer} onChange={v => setData({ ...data, curPer: v })} step={1} /></Field>
+                      <Field label="Future ($ / sample)" hint="0 to skip future"><Num value={data.futPer} onChange={v => setData({ ...data, futPer: v })} step={1} /></Field>
+                    </div>}
+                <div className={"price-chip" + (dataChipValid ? "" : " invalid")}>
+                  <span className="tag">data / sample</span>
+                  <span className="num">{dataChip}</span>
+                </div>
+              </>)}
+            </div>
           </div>
           <div>
             <div className="col-h">Combined output</div>
@@ -637,6 +686,13 @@ export default function NGSCalculator() {
                   <div className="kpi"><div className="l">Future + reseq / sample</div><div className="v num">{usd2(out.futPlusReseq)}</div></div>
                 </div>
               )}
+              {data.enabled === "Yes" && (
+                <div className="kpis" style={{ marginTop: 12 }}>
+                  <div className="kpi"><div className="l">Current data / sample</div><div className="v num">{usd2(out.dataCurPerSample)}</div></div>
+                  <div className="kpi"><div className="l">Future data / sample</div><div className="v num">{usd2(out.dataFutPerSample)}</div></div>
+                  <div className="kpi"><div className="l">Cost model</div><div className="v" style={{ fontSize: 15 }}>{data.mode}</div></div>
+                </div>
+              )}
             </div>
             <div className="outpanel">
               <div className="out-h"><span className="bar" /> Total future vendor vs current</div>
@@ -646,10 +702,12 @@ export default function NGSCalculator() {
                   <tbody>
                     <FinRow label="Current Vendor" cost={out.K4} base={out.K4} isCurrent />
                     {reseq.enabled === "Yes" && <FinRow label="Current + resequencing" cost={out.curPlusReseq} base={out.K4} />}
+                    {data.enabled === "Yes" && <FinRow label="Current + data analysis" cost={out.curPlusData} base={out.K4} />}
                     <FinRow label="Future Vendor" cost={out.K8} base={out.K4} />
                     {reseq.enabled === "Yes" && <FinRow label="Future + resequencing" cost={out.futPlusReseq} base={out.K4} />}
                     {robot.enabled === "Yes" && <FinRow label="Future + robot" cost={out.K12} base={out.K4} />}
                     {seq.enabled === "Yes" && <FinRow label="Future + sequencer" cost={out.K8 + (seqValid ? out.C35 : 0)} base={out.K4} />}
+                    {data.enabled === "Yes" && <FinRow label="Future + data analysis" cost={out.futPlusData} base={out.K4} />}
                     <FinRow label="Total future Vendor" cost={out.K20} base={out.K4} />
                   </tbody>
                 </table>
@@ -658,8 +716,10 @@ export default function NGSCalculator() {
                   <tbody>
                     <FinRow label="Current Vendor" cost={out.K6} base={out.K6} isCurrent fmt={usd0} />
                     {reseq.enabled === "Yes" && <FinRow label="Current + resequencing" cost={out.curPlusReseqYear} base={out.K6} fmt={usd0} />}
+                    {data.enabled === "Yes" && <FinRow label="Current + data analysis" cost={out.curPlusDataYear} base={out.K6} fmt={usd0} />}
                     <FinRow label="Future Vendor" cost={out.K10} base={out.K6} fmt={usd0} />
                     {reseq.enabled === "Yes" && <FinRow label="Future + resequencing" cost={out.futPlusReseqYear} base={out.K6} fmt={usd0} />}
+                    {data.enabled === "Yes" && <FinRow label="Future + data analysis" cost={out.futPlusDataYear} base={out.K6} fmt={usd0} />}
                     <FinRow label="Total future Vendor" cost={out.K22} base={out.K6} fmt={usd0} />
                   </tbody>
                 </table>
@@ -681,7 +741,7 @@ export default function NGSCalculator() {
 
       <div className="foot">
         <span>{COPYRIGHT}</span>
-        {tab === "combined" && <span>Per-sample add-on = total price / annual volume &middot; resequencing = failure rate x cost / sample</span>}
+        {tab === "combined" && <span>Per-sample add-on = total price / annual volume &middot; resequencing = failure rate x cost / sample &middot; data analysis = annual fee or cost / sample, per vendor</span>}
       </div>
     </div>
   );
@@ -690,4 +750,3 @@ export default function NGSCalculator() {
 function Quirk() {
   return null;
 }
-

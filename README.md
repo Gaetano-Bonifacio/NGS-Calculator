@@ -1,81 +1,56 @@
 # NGS Calculator
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![React](https://img.shields.io/badge/React-18.2-61dafb.svg)](https://react.dev/) [![Build step](https://img.shields.io/badge/build%20step-none-brightgreen.svg)](#run-it-offline)
+A single-file, browser-based calculator for evaluating the multiplexing and economics of next-generation sequencing (NGS) panels on a given sequencer and flow cell. It is built for teams comparing sequencing vendor economics and panel multiplexing decisions.
 
-![NGS Calculator preview](https://github.com/Gaetano-Bonifacio/NGS-Calculator/raw/main/Preview_GitHub.png)
+**Live demo:** once GitHub Pages is enabled for this repository, the tool is served at `https://gaetano-bonifacio.github.io/NGS-Calculator/`.
 
-A free, browser-based calculator for next-generation sequencing (NGS) panel multiplexing and economics. It helps genomics labs and sequencing service teams work out what sequencing really costs, and compare two setups (for example your current vendor against a new instrument or price) side by side, so you can see the cost per sample, per run and per year before you commit.
-
-Prepared by Gaetano Bonifacio PhD, MBA | 2026
-
-Repository: <https://github.com/Gaetano-Bonifacio/NGS-Calculator>
-
-## Try it now
-
-**Live site:**
-
-```
-https://gaetano-bonifacio.github.io/NGS-Calculator/
-```
-
-Open the link and start entering your values. It runs entirely in your browser. There is nothing to install, no account to create, and the numbers you type never leave your computer.
+Prepared by Gaetano Bonifacio PhD, MBA | 2026.
 
 ## What it does
 
-- Compares a current setup against a future setup (a different vendor, instrument or price) at a glance.
-- Shows cost per sample, cost per run and cost per year for each setup, plus the yearly and per-sample savings between them.
-- Lets you turn multiplexing on or off and shows how many flow cells each setup needs.
-- Adds an optional liquid-handling robot cost and an optional sequencer cost, each charged per sample, so you can test the effect of automation or a new instrument.
-- Adds optional resequencing: a failure rate per vendor that charges the cost of re-running failed samples on top of the per-sample cost.
-- Presents everything as clear figures and charts on a dark, easy-to-read interface.
+The calculator is organised into four tabs.
 
-## How to use it
+1. **Multiplexing.** Place one or several panels on a single flow cell and see total flow-cell coverage, flow cells needed, run time, samples per year, and a per-panel coverage breakdown. Toggle multiplexing on or off to switch between sharing a flow cell and giving each panel its own.
+2. **Current vs Future Vendor.** Configure two vendors side by side and compare cost per sample, cost per run, and yearly cost, with the per-sample and yearly savings. Each vendor shows its own technical output (coverage, flow cells, run time, reads per flow cell).
+3. **Product database.** Add or edit the NGS panels (name, M reads per sample, price) and the sequencers and their flow cells (M reads per flow cell, run time). Every lookup across the whole tool updates live, so anything entered here flows through the other tabs.
+4. **Combined NGS costs.** Layer optional add-ons onto the future vendor and roll them into a total: a liquid-handling robot, an extra sequencer, resequencing, and data analysis.
 
-1. Enter your panels. For each panel, give the number of samples, the reads needed per sample, and the reagent price.
-2. Describe your sequencing setup: the instrument output, the flow-cell cost and how many runs you do per year.
-3. Fill in the same details for the second setup you want to compare against.
-4. Optionally switch on the liquid-handling robot and the sequencer add-on, with their cost and the number of samples they apply to.
-5. Optionally switch on resequencing and set a failure rate for the current and the future setup. The resequencing cost per sample is the failure rate times that setup's cost per sample, so a 5 percent rate adds 5 percent to the cost per sample. It feeds into the future totals, the yearly figure and the chart.
-6. Read the results: cost per sample, per run and per year for both setups, the flow cells required, and the savings between them.
+## How the numbers work
 
-Turning multiplexing on or off recalculates how many flow cells you need, which is often the biggest driver of cost per sample.
+- **Coverage** of a panel is `(samples x M reads per sample) / M reads per flow cell`. Multiplexed, the flow cells needed is the ceiling of the summed coverage; not multiplexed, it is the sum of each panel rounded up.
+- **Cost per sample** is the yearly cost divided by the annual sample volume. **Yearly cost** is the per-run cost (reagents plus flow cells) multiplied by runs per year.
+- **Robot and sequencer add-ons** use a per-sample amortization equal to `total price / annual sample volume`, with optional per-sample consumables for the robot.
+- **Resequencing** applies a failure rate to the sequencing cost per sample, set independently for the current and future vendor.
+- **Data analysis** is an optional cost on the current and/or future vendor, entered either as an annual fee or as a cost per sample. Either side can be left at zero. The annual fee is converted to a per-sample equivalent using that vendor's annual volume; the per-sample cost is converted to a yearly figure the same way. Only the future side rolls into the total-future figures; the current side is shown as its own comparison line.
 
-## Requirements
+All routine economics were checked against a spreadsheet recalculation and hand derivation, and the calculation logic ships with a Node verification harness.
 
-The page loads its charting and rendering libraries from public content delivery networks, so it needs an internet connection. If a library cannot load, for example on a restricted network, the page shows a short message naming what is missing rather than a blank screen.
+## Customising the inputs
 
-## Run it offline
+Everything is editable in the **Product database** tab without touching code. You can add custom NGS panels with their read budget and price, add or remove sequencers and the flow cells under each, and adjust reads and run times. Robot models and prices are entered directly in the Combined NGS costs tab. This makes it straightforward to drop in any vendor's panel and equipment figures and read off the outcome.
 
-Prefer to run it without the live site? You can:
+## Running it
 
-1. Download this repository (green **Code** button, then **Download ZIP**) and unzip it.
-2. Open `index.html` in any modern web browser, or serve the folder:
+- **Hosted:** open the GitHub Pages URL above.
+- **Locally:** download `index.html` and open it in any modern browser. It is fully self-contained and needs only internet access to load its libraries from CDN. If a library fails to load, the page shows which one rather than going blank.
 
-```
-python3 -m http.server 8000
-# then open http://localhost:8000
-```
+## Repository contents
 
-An internet connection is still needed for the libraries mentioned above.
+- `index.html` - the self-contained, deployable application (this is what GitHub Pages serves).
+- `ngs_calculator.jsx` - the readable React source the application is built from.
 
-## Can you trust the numbers?
+## Built with
 
-The cost logic is covered by an automated test suite of 37 checks across six scenarios and edge cases, with the expected answers worked out by hand rather than copied from a spreadsheet. The suite confirms, among other things, that multiplexing applies the correct flow-cell rule (the number of flow cells is based on the combined coverage of the pooled panels, not one per panel), that the robot and sequencer add-ons are charged per sample, and that resequencing applies a per-vendor failure rate to the cost per sample without the current and future rates leaking into each other. A non-regression check confirms the totals are unchanged when resequencing is switched off. As with any estimate, validate the output against your own quotes and conditions before making a purchasing decision.
+- React 18.2.0 and ReactDOM (UMD, via unpkg)
+- PropTypes 15.8.1 (UMD, via unpkg)
+- Recharts 2.15.4 (UMD, via jsDelivr; the 2.15.4 minified UMD bundle is not published on unpkg)
+- Babel standalone 7.24.7 for in-browser JSX
+- IBM Plex Sans and IBM Plex Mono
 
-To run the suite yourself:
+## Disclaimer
 
-```
-node verify.mjs
-```
+The outputs are estimates intended to support sequencing economics and multiplexing decisions. They are not financial advice. Verify vendor pricing, read budgets, and equipment costs against current quotes before relying on the results.
 
-## What is in this repository
+## Copyright
 
-- `index.html` is the calculator itself, a single self-contained file.
-- `ngs_calculator.jsx` is the readable source for anyone who wants to inspect or adapt it.
-- `verify.mjs` is the automated test suite behind the trust note above.
-
-## License
-
-Released under the MIT License (see `LICENSE`). You are free to use, copy, modify and distribute it, provided the copyright and permission notice are kept. Please keep the attribution line in the header and footer of the tool.
-
-Prepared by Gaetano Bonifacio PhD, MBA | 2026
+Copyright (c) 2026 Gaetano Bonifacio PhD, MBA. All rights reserved.
