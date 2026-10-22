@@ -57,6 +57,31 @@ const nn = v => {
 const perSample = (total, volume) => volume > 0 ? total / volume : NaN;
 const years = y => nn(y) > 0 ? nn(y) : 1;
 const maxPerFlowcell = (H, reads) => H > 0 && reads > 0 ? Math.floor(H / reads + EPS) : null;
+function minDepthForVaf(vaf, k) {
+  const f = nn(vaf),
+    kk = nn(k);
+  if (!(f > 0 && f < 1) || !kk) return null;
+  return Math.ceil(kk / f - EPS);
+}
+function coverageCheck(b, cov) {
+  const depth = nn(b.depth),
+    reads = nn(b.reads);
+  if (!b.app || !depth || !reads) return null;
+  const somatic = b.app === "Somatic";
+  const reqMin = somatic ? minDepthForVaf(nn(b.vaf) / 100, cov.minAltReads) : nn(cov.germlineMin);
+  const ratio = nn(cov.minToMean) / 100;
+  if (!reqMin || !ratio) return null;
+  const reqMean = reqMin / ratio;
+  const readsNeeded = reads * reqMean / depth;
+  return {
+    somatic,
+    reqMin,
+    reqMean,
+    readsNeeded,
+    depth,
+    meets: reads >= readsNeeded - EPS
+  };
+}
 function routine(panels, H, fcCost, runs, multiplex, runtime) {
   const active = multiplex ? panels : panels.slice(0, 1);
   const rows = active.filter(p => p && p.name).map(p => {
@@ -234,7 +259,10 @@ const SEED_BUNDLES = [{
   price: 690,
   basis: "Vendor-stated",
   source: SRC.tso500,
-  note: "100M paired-end reads per sample"
+  note: "100M paired-end reads per sample, 3,500x coverage",
+  app: "Somatic",
+  depth: 3500,
+  vaf: 5
 }, {
   id: "p-tso500ctdna",
   name: "TruSight Oncology 500 ctDNA v2",
@@ -243,7 +271,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Vendor-stated",
   source: SRC.tso500ct,
-  note: "~800M paired-end reads per sample, before read collapsing"
+  note: "~800M paired-end reads per sample, ~35,000x before UMI collapsing. Mean depth left blank: the variant-read rule applies to unique reads.",
+  app: "Somatic",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-ampli-comp3",
   name: "AmpliSeq for Illumina Comprehensive Panel v3",
@@ -252,7 +283,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Derived",
   source: SRC.ampComp,
-  note: "16 samples per NextSeq 550 Mid Output (260M reads) and 48 per High Output (800M reads), 500x minimum"
+  note: "16 samples per NextSeq 550 Mid Output (260M reads) and 48 per High Output (800M reads), 500x minimum",
+  app: "Somatic",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-ampli-focus",
   name: "AmpliSeq for Illumina Focus Panel",
@@ -261,7 +295,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Derived",
   source: SRC.ampFocus,
-  note: "48 samples per MiSeq v3 (50M reads), 500x minimum"
+  note: "48 samples per MiSeq v3 (50M reads), 500x minimum",
+  app: "Somatic",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-sophia-msk",
   name: "MSK-IMPACT powered with SOPHiA DDM (tumor + normal pair)",
@@ -270,7 +307,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Vendor-stated",
   source: SRC.msk,
-  note: "66M paired-end reads per tumor/normal pair (12 pairs per NextSeq 550 High Output). Count one sample per pair."
+  note: "66M paired-end reads per tumor/normal pair (12 pairs per NextSeq 550 High Output). Count one sample per pair.",
+  app: "Somatic",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-sophia-ces3",
   name: "SOPHiA DDM Clinical Exome Solution v3",
@@ -279,7 +319,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Vendor-stated",
   source: SRC.ces,
-  note: "Performance data at 16.25M reads per sample (16 per NextSeq Mid Output)"
+  note: "Performance data at 16.25M reads per sample (16 per NextSeq Mid Output)",
+  app: "Germline",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-sophia-wes2",
   name: "SOPHiA DDM Whole Exome Solution v2",
@@ -288,7 +331,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Vendor-stated",
   source: SRC.wes,
-  note: "Performance data at 80M reads per sample (the factsheet also lists 12 samples per NextSeq 550 High Output, about 67M each)"
+  note: "Performance data at 80M reads per sample (the factsheet also lists 12 samples per NextSeq 550 High Output, about 67M each)",
+  app: "Germline",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-sophia-sts",
   name: "SOPHiA Solid Tumor Solution (42 genes)",
@@ -297,7 +343,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Derived",
   source: SRC.sts,
-  note: "24 samples per MiSeq v3 (50M reads) at 1000x median depth"
+  note: "24 samples per MiSeq v3 (50M reads) at 1000x median depth",
+  app: "Somatic",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-custom-1",
   name: "",
@@ -306,7 +355,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Custom",
   source: "",
-  note: ""
+  note: "",
+  app: "",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-custom-2",
   name: "",
@@ -315,7 +367,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Custom",
   source: "",
-  note: ""
+  note: "",
+  app: "",
+  depth: "",
+  vaf: 5
 }, {
   id: "p-custom-3",
   name: "",
@@ -324,7 +379,10 @@ const SEED_BUNDLES = [{
   price: 0,
   basis: "Custom",
   source: "",
-  note: ""
+  note: "",
+  app: "",
+  depth: "",
+  vaf: 5
 }];
 const SEED_SEQUENCERS = [{
   id: "s-aviti",
@@ -488,6 +546,12 @@ function defaultScenario() {
       futAnnual: 50000,
       curPer: 20,
       futPer: 20
+    },
+    coverage: {
+      sizeByReq: "No",
+      germlineMin: 30,
+      minAltReads: 50,
+      minToMean: 20
     }
   };
 }
@@ -514,7 +578,10 @@ function normalizeScenario(s) {
         price: 0,
         basis: "Custom",
         source: "",
-        note: ""
+        note: "",
+        app: "",
+        depth: "",
+        vaf: 5
       },
       ...b
     })),
@@ -532,7 +599,8 @@ function normalizeScenario(s) {
     robot: obj(s.robot, d.robot),
     seq: obj(s.seq, d.seq),
     reseq: obj(s.reseq, d.reseq),
-    data: obj(s.data, d.data)
+    data: obj(s.data, d.data),
+    coverage: obj(s.coverage, d.coverage)
   };
   out.current.panels = panels(out.current.panels, d.current.panels);
   out.future.panels = panels(out.future.panels, d.future.panels);
@@ -574,6 +642,14 @@ const usd2 = n => n == null || isNaN(n) ? "-" : n.toLocaleString("en-US", {
 });
 const pct1 = n => n == null || isNaN(n) ? "-" : (n * 100).toFixed(1) + "%";
 const int = n => n == null || isNaN(n) ? "-" : Math.round(n).toLocaleString("en-US");
+const fmtM = v => v == null || isNaN(v) ? "-" : (Math.round(v * 10) / 10).toLocaleString("en-US");
+const covReq = b => b.check.somatic ? nn(b.vaf) + "% VAF" : int(b.check.reqMin) + "x minimum";
+const covText = b => {
+  const c = b.check;
+  if (b.sized) return "Sized by coverage: " + fmtM(c.readsNeeded) + " M reads for " + covReq(b) + " (" + int(c.reqMean) + "x mean)";
+  if (c.meets) return "Meets " + covReq(b) + ": needs " + int(c.reqMean) + "x mean, has " + int(c.depth) + "x";
+  return "Below " + covReq(b) + ": needs " + fmtM(c.readsNeeded) + " M reads (" + int(c.reqMean) + "x mean)";
+};
 const compactUsd = v => {
   const a = Math.abs(v);
   if (a >= 1e6) return "$" + (v / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M";
@@ -810,7 +886,12 @@ function PanelRows({
       className: "rowhint"
     }, "Fits up to ", React.createElement("b", {
       className: "num"
-    }, int(max)), " samples per flow cell at ", nn(b.reads), " M reads each"));
+    }, int(max)), " samples per flow cell at ", fmtM(nn(b.reads)), " M reads each"), b && b.name && b.check && React.createElement("div", {
+      className: "rowhint cov " + (b.check.meets || b.sized ? "ok" : "short")
+    }, React.createElement("span", {
+      className: "cdot",
+      "aria-hidden": "true"
+    }), covText(b)));
   }));
 }
 function SeqFlowFields({
@@ -1162,6 +1243,13 @@ const CSS = `
   .panel-row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px;margin-bottom:4px;}
   .rowhint{font-size:11px;color:var(--mut);margin:0 2px 9px;}
   .rowhint b{color:var(--teal);font-weight:600;}
+  .rowhint.cov{display:flex;gap:6px;align-items:baseline;margin-top:-6px;}
+  .cdot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--good);transform:translateY(-1px);}
+  .rowhint.short .cdot{background:var(--bad);} .rowhint.short{color:var(--ink);}
+  .covstat{font-size:11px;white-space:nowrap;} .covstat.ok{color:var(--good);} .covstat.short{color:var(--bad);}
+  .dbtable select:disabled,.dbtable input:disabled{opacity:.45;}
+  .modebar{margin:12px 30px 0;font-size:12px;color:var(--mut);display:flex;gap:8px;align-items:center;}
+  .modebar .cdot{background:var(--teal);}
   .outpanel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px;min-width:0;}
   .out-h{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);font-weight:600;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
   .out-h .bar{width:18px;height:2px;background:var(--teal);}
@@ -1205,7 +1293,7 @@ const CSS = `
   .dbtable input.dup{border-color:var(--amber);}
   .dbtable .num input{font-family:'IBM Plex Mono',monospace;}
   .dbtable tr.pending td{background:color-mix(in srgb,var(--bad) 8%,transparent);}
-  .panels-db{min-width:820px;} .flow-db{min-width:520px;} .robot-db{min-width:600px;}
+  .panels-db{min-width:1180px;} .flow-db{min-width:520px;} .robot-db{min-width:600px;}
   .panels-db td:first-child{min-width:240px;} .flow-db td:first-child,.robot-db td:first-child{min-width:170px;}
   .seqgroup{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-bottom:12px;background:var(--panel2);}
   .seqgroup-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
@@ -1264,7 +1352,7 @@ const CSS = `
     .tabs{padding:0 8px;}
     .tab{padding:12px 10px;font-size:12.5px;}
     .layout{padding:16px;gap:4px;}
-    .secthead,.disc,.notice{margin-left:16px;margin-right:16px;}
+    .secthead,.disc,.notice,.modebar{margin-left:16px;margin-right:16px;}
     .section{margin:16px 16px 0;}
     .foot{margin:22px 16px 0;}
     .outpanel{padding:14px;}
@@ -1288,6 +1376,7 @@ function NGSCalculator() {
   const [seq, setSeq] = useState(init.seq);
   const [reseq, setReseq] = useState(init.reseq);
   const [data, setData] = useState(init.data);
+  const [coverage, setCoverage] = useState(init.coverage);
   const [tab, setTab] = useState(init.tab);
   const [notice, setNotice] = useState(null);
   const [pending, setPending] = useState(null);
@@ -1306,11 +1395,12 @@ function NGSCalculator() {
     robot,
     seq,
     reseq,
-    data
+    data,
+    coverage
   };
   useEffect(() => {
     setSaved(saveScenario(scenario));
-  }, [tab, bundles, sequencers, robots, current, future, mplex, robot, seq, reseq, data]);
+  }, [tab, bundles, sequencers, robots, current, future, mplex, robot, seq, reseq, data, coverage]);
   useEffect(() => {
     if (!notice) return undefined;
     const t = setTimeout(() => setNotice(null), 5000);
@@ -1327,6 +1417,7 @@ function NGSCalculator() {
     setSeq(s.seq);
     setReseq(s.reseq);
     setData(s.data);
+    setCoverage(s.coverage);
     setTab(s.tab);
     setPending(null);
   };
@@ -1381,7 +1472,20 @@ function NGSCalculator() {
       text: "Reset to the default data. Your saved changes in this browser were cleared."
     });
   };
-  const bMap = useMemo(() => Object.fromEntries(bundles.map(b => [b.id, b])), [bundles]);
+  const sizeByReq = coverage.sizeByReq === "Yes";
+  const effBundles = useMemo(() => bundles.map(b => {
+    const check = coverageCheck(b, coverage);
+    return sizeByReq && check ? {
+      ...b,
+      check,
+      reads: check.readsNeeded,
+      sized: true
+    } : {
+      ...b,
+      check
+    };
+  }), [bundles, coverage, sizeByReq]);
+  const bMap = useMemo(() => Object.fromEntries(effBundles.map(b => [b.id, b])), [effBundles]);
   const resolveFC = st => {
     const s = sequencers.find(x => x.id === st.sequencerId);
     const f = s && s.flowcells.find(x => x.id === st.flowcellId);
@@ -1471,7 +1575,7 @@ function NGSCalculator() {
   const numOrBlank = v => v === "" ? "" : Math.max(0, Number(v));
   const updateBundle = (id, key, v) => setBundles(bundles.map(b => b.id === id ? {
     ...b,
-    [key]: ["reads", "price"].includes(key) ? numOrBlank(v) : v
+    [key]: ["reads", "price", "depth", "vaf"].includes(key) ? numOrBlank(v) : v
   } : b));
   const addBundle = () => setBundles([...bundles, {
     id: uid("p"),
@@ -1644,7 +1748,7 @@ function NGSCalculator() {
     panels: out.fut.reagent_sample,
     flow: out.fut.fc_sample
   }, {
-    name: "Total future",
+    name: "Future TCO",
     panels: out.fut.reagent_sample,
     flow: out.fut.fc_sample,
     reseq: out.reseqFut,
@@ -1653,7 +1757,7 @@ function NGSCalculator() {
     seq: out.seqSample
   }] : [];
   const dataChipValid = out.dataCurValid && out.dataFutValid;
-  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["database", "03", "Product database"], ["combined", "04", "Combined NGS costs"]];
+  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["database", "03", "Product database"], ["combined", "04", "Total Cost of Ownership"]];
   const onTabKey = (e, i) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const n = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
@@ -1734,7 +1838,12 @@ function NGSCalculator() {
   }, ix), label))), notice && React.createElement("div", {
     className: "notice" + (notice.err ? " err" : ""),
     role: "status"
-  }, notice.text), React.createElement("main", {
+  }, notice.text), sizeByReq && tab !== "database" && React.createElement("div", {
+    className: "modebar"
+  }, React.createElement("span", {
+    className: "cdot",
+    "aria-hidden": "true"
+  }), "Reads per sample follow the coverage requirement for panels with a mean depth (set in Product database)."), React.createElement("main", {
     role: "tabpanel",
     id: "panel-" + tab,
     "aria-labelledby": "tab-" + tab
@@ -1766,7 +1875,7 @@ function NGSCalculator() {
   })), React.createElement(PanelRows, {
     state: mplex,
     set: setMplex,
-    bundles: bundles,
+    bundles: effBundles,
     H: mx.r.H
   }), React.createElement(SeqFlowFields, {
     state: mplex,
@@ -1882,7 +1991,7 @@ function NGSCalculator() {
     state: current,
     set: setCurrent,
     effective: current,
-    bundles: bundles,
+    bundles: effBundles,
     sequencers: sequencers,
     r: out.cur,
     active: curActive,
@@ -1894,7 +2003,7 @@ function NGSCalculator() {
     state: future,
     set: setFuture,
     effective: futEff,
-    bundles: bundles,
+    bundles: effBundles,
     sequencers: sequencers,
     r: out.fut,
     active: futActive,
@@ -2005,6 +2114,55 @@ function NGSCalculator() {
     className: "out-h"
   }, React.createElement("span", {
     className: "bar"
+  }), " Coverage requirements"), React.createElement("div", {
+    className: "addon"
+  }, React.createElement(Field, {
+    label: "Germline: minimum depth per base (x)",
+    hint: "Recommended 30x"
+  }, React.createElement(Num, {
+    value: coverage.germlineMin,
+    onChange: v => setCoverage({
+      ...coverage,
+      germlineMin: v
+    })
+  })), React.createElement(Field, {
+    label: "Somatic: minimum variant reads",
+    hint: "Depth per base = reads / VAF (50 at 5% = 1,000x)"
+  }, React.createElement(Num, {
+    value: coverage.minAltReads,
+    onChange: v => setCoverage({
+      ...coverage,
+      minAltReads: v
+    }),
+    min: 1
+  })), React.createElement(Field, {
+    label: "Uniformity: 95% of bases reach (% of mean)",
+    hint: "Illumina metric: bases above 0.2x mean = 20"
+  }, React.createElement(Num, {
+    value: coverage.minToMean,
+    onChange: v => setCoverage({
+      ...coverage,
+      minToMean: v
+    }),
+    min: 1
+  }))), React.createElement(Field, {
+    label: "Size panels by coverage requirement?",
+    hint: "No: use the vendor reads per sample. Yes: use the reads needed to meet the requirement (panels with a mean depth only).",
+    group: true
+  }, React.createElement(Toggle, {
+    value: coverage.sizeByReq,
+    onChange: v => setCoverage({
+      ...coverage,
+      sizeByReq: v
+    })
+  })), React.createElement("div", {
+    className: "note"
+  }, "Somatic depth = ", int(nn(coverage.minAltReads)), " variant reads / the panel's VAF (5% VAF needs ", int(minDepthForVaf(0.05, coverage.minAltReads)), "x). Both are per-base minimums for at least 95% of target bases, so required mean depth = required depth / ", int(nn(coverage.minToMean)), "%. Reads needed = stated reads x required mean depth / stated mean depth.")), React.createElement("div", {
+    className: "outpanel"
+  }, React.createElement("div", {
+    className: "out-h"
+  }, React.createElement("span", {
+    className: "bar"
   }), " NGS panels"), React.createElement("div", {
     className: "note",
     style: {
@@ -2014,7 +2172,7 @@ function NGSCalculator() {
     className: "badge v"
   }, "Vendor-stated"), " comes from the vendor's documentation, ", React.createElement("span", {
     className: "badge f"
-  }, "Derived"), " is flow cell output divided by the vendor's recommended samples per run. Prices are blank: enter your own."), React.createElement("div", {
+  }, "Derived"), " is flow cell output divided by the vendor's recommended samples per run. Prices are blank: enter your own. To check coverage, set Germline or Somatic and the mean depth the vendor states at those reads."), React.createElement("div", {
     className: "tscroll"
   }, React.createElement("table", {
     className: "dbtable panels-db"
@@ -2028,9 +2186,25 @@ function NGSCalculator() {
     }
   }, "M reads / sample"), React.createElement("th", {
     style: {
-      width: 110
+      width: 100
     }
   }, "Price ($)"), React.createElement("th", {
+    style: {
+      width: 110
+    }
+  }, "Use"), React.createElement("th", {
+    style: {
+      width: 100
+    }
+  }, "Mean depth (x)"), React.createElement("th", {
+    style: {
+      width: 80
+    }
+  }, "VAF (%)"), React.createElement("th", {
+    style: {
+      width: 160
+    }
+  }, "Coverage"), React.createElement("th", {
     style: {
       width: 120
     }
@@ -2071,7 +2245,50 @@ function NGSCalculator() {
     value: b.price,
     "aria-label": "Price",
     onChange: e => updateBundle(b.id, "price", e.target.value)
-  })), React.createElement("td", null, b.source ? React.createElement("a", {
+  })), React.createElement("td", null, React.createElement("select", {
+    value: b.app || "",
+    "aria-label": "Germline or somatic",
+    onChange: e => updateBundle(b.id, "app", e.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "-"), React.createElement("option", {
+    value: "Germline"
+  }, "Germline"), React.createElement("option", {
+    value: "Somatic"
+  }, "Somatic"))), React.createElement("td", {
+    className: "num"
+  }, React.createElement("input", {
+    type: "number",
+    min: 0,
+    step: "any",
+    value: b.depth,
+    "aria-label": "Mean depth at the stated reads",
+    onChange: e => updateBundle(b.id, "depth", e.target.value)
+  })), React.createElement("td", {
+    className: "num"
+  }, React.createElement("input", {
+    type: "number",
+    min: 0,
+    max: 100,
+    step: "any",
+    value: b.app === "Somatic" ? b.vaf : "",
+    disabled: b.app !== "Somatic",
+    placeholder: b.app === "Germline" ? int(nn(coverage.germlineMin)) + "x" : "",
+    "aria-label": "Lowest VAF to detect, percent",
+    onChange: e => updateBundle(b.id, "vaf", e.target.value)
+  })), React.createElement("td", null, (() => {
+    if (!b.app) return React.createElement("span", {
+      className: "covstat"
+    }, "-");
+    const c = coverageCheck(b, coverage);
+    if (!c) return React.createElement("span", {
+      className: "covstat"
+    }, "Add mean depth");
+    return React.createElement("span", {
+      className: "covstat " + (c.meets ? "ok" : "short"),
+      title: "Needs " + int(c.reqMin) + "x minimum, " + int(c.reqMean) + "x mean"
+    }, c.meets ? "Meets" : "Below", " \xB7 needs ", fmtM(c.readsNeeded), " M");
+  })()), React.createElement("td", null, b.source ? React.createElement("a", {
     className: "srcl",
     href: b.source,
     target: "_blank",
@@ -2241,15 +2458,15 @@ function NGSCalculator() {
     style: {
       marginBottom: 10
     }
-  }, "Robots used in Combined NGS costs. Price and consumables are your own figures. Per-sample cost = (price / depreciation years) / annual sample volume on the robot."), React.createElement("div", {
+  }, "Robots used in Total Cost of Ownership. Enter a purchase price or a lease cost, and the years it covers. Per-sample cost = cost / years / annual sample volume on the robot."), React.createElement("div", {
     className: "tscroll"
   }, React.createElement("table", {
     className: "dbtable robot-db"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Robot"), React.createElement("th", {
     style: {
-      width: 120
+      width: 130
     }
-  }, "Price ($)"), React.createElement("th", {
+  }, "Purchase or lease ($)"), React.createElement("th", {
     style: {
       width: 130
     }
@@ -2257,7 +2474,7 @@ function NGSCalculator() {
     style: {
       width: 120
     }
-  }, "Depreciation (yrs)"), React.createElement("th", {
+  }, "Spread over (yrs)"), React.createElement("th", {
     style: {
       width: 150
     }
@@ -2320,13 +2537,13 @@ function NGSCalculator() {
     onClick: addRobot
   }, "+ Add robot")))), tab === "combined" && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "secthead"
-  }, React.createElement("b", null, "Combined NGS costs."), " Layer optional add-ons onto the future setup defined in Current vs Future Sequencing Setup and roll them into a total."), React.createElement("details", {
+  }, React.createElement("b", null, "Total Cost of Ownership."), " Add equipment (purchase or lease), resequencing and data analysis on top of the future sequencing setup, and compare the total with the current vendor."), React.createElement("details", {
     className: "disc"
   }, React.createElement("summary", null, React.createElement("span", {
     className: "ic"
-  }, "\u25B8"), " How the add-ons are calculated"), React.createElement("div", {
+  }, "\u25B8"), " How the total cost of ownership is calculated"), React.createElement("div", {
     className: "body note"
-  }, React.createElement("ul", null, React.createElement("li", null, React.createElement("b", null, "Robot and sequencer:"), " per-sample cost = (price / depreciation years) / annual sample volume on that equipment. The yearly figure allocates that per-sample cost to the future setup's own annual volume."), React.createElement("li", null, React.createElement("b", null, "Resequencing:"), " failure rate x sequencing cost per sample, set separately for each vendor."), React.createElement("li", null, React.createElement("b", null, "Data analysis:"), " an annual fee (divided by that vendor's annual volume) or a cost per sample, per vendor. Either side can be 0."), React.createElement("li", null, React.createElement("b", null, "Current all-in"), " adds the current vendor's own resequencing and data analysis, so it compares like for like with the total future cost.")))), React.createElement("div", {
+  }, React.createElement("ul", null, React.createElement("li", null, React.createElement("b", null, "Robot and sequencer (purchase or lease):"), " per-sample cost = cost / years / annual sample volume on that equipment. Enter a purchase price spread over its years of use, or a lease cost with its term. The yearly figure allocates that per-sample cost to the future setup's own annual volume."), React.createElement("li", null, React.createElement("b", null, "Resequencing:"), " failure rate x sequencing cost per sample, set separately for each vendor."), React.createElement("li", null, React.createElement("b", null, "Data analysis:"), " an annual fee (divided by that vendor's annual volume) or a cost per sample, per vendor. Either side can be 0."), React.createElement("li", null, React.createElement("b", null, "Current all-in"), " adds the current vendor's own resequencing and data analysis, so it compares like for like with the future total cost of ownership.")))), React.createElement("div", {
     className: "layout"
   }, React.createElement("div", null, React.createElement("div", {
     className: "col-h"
@@ -2352,7 +2569,7 @@ function NGSCalculator() {
     className: "addon"
   }, React.createElement(Field, {
     label: "Robot model",
-    hint: "Edit the list in Product database"
+    hint: "Edit robots in Product database"
   }, React.createElement(Select, {
     value: robot.robotId,
     onChange: v => setRobot({
@@ -2374,13 +2591,14 @@ function NGSCalculator() {
   }))), robotObj && React.createElement("div", {
     className: "addon"
   }, React.createElement(Field, {
-    label: "Total price ($)"
+    label: "Purchase or lease cost ($)"
   }, React.createElement(Num, {
     value: robotObj.price,
     onChange: v => updateRobot(robotObj.id, "price", v),
     step: 1000
   })), React.createElement(Field, {
-    label: "Depreciation (years)"
+    label: "Spread over (years)",
+    hint: "Years of use, or the lease term"
   }, React.createElement(Num, {
     value: robotObj.years,
     onChange: v => updateRobot(robotObj.id, "years", v),
@@ -2428,7 +2646,7 @@ function NGSCalculator() {
     options: seqOptions,
     placeholder: "Select sequencer"
   })), React.createElement(Field, {
-    label: "Total price ($)"
+    label: "Purchase or lease cost ($)"
   }, React.createElement(Num, {
     value: seq.price,
     onChange: v => setSeq({
@@ -2437,7 +2655,8 @@ function NGSCalculator() {
     }),
     step: 1000
   })), React.createElement(Field, {
-    label: "Depreciation (years)"
+    label: "Spread over (years)",
+    hint: "Years of use, or the lease term"
   }, React.createElement(Num, {
     value: seq.years,
     onChange: v => setSeq({
@@ -2593,7 +2812,7 @@ function NGSCalculator() {
     className: "out-h"
   }, React.createElement("span", {
     className: "bar"
-  }), " Total future setup vs current"), React.createElement(Warnings, {
+  }), " Total cost of ownership vs current"), React.createElement(Warnings, {
     items: compareWarn
   }), bothActive && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "kpis",
@@ -2604,7 +2823,7 @@ function NGSCalculator() {
     className: "kpi"
   }, React.createElement("div", {
     className: "l"
-  }, "Total future / sample"), React.createElement("div", {
+  }, "Future TCO / sample"), React.createElement("div", {
     className: "v num"
   }, usd2(out.K20))), React.createElement("div", {
     className: "kpi"
@@ -2658,7 +2877,7 @@ function NGSCalculator() {
     cost: out.futPlusData,
     base: out.K4
   }), React.createElement(FinRow, {
-    label: "Total future setup",
+    label: "Total cost of ownership (future)",
     cost: out.K20,
     base: out.K4,
     strong: true
@@ -2705,7 +2924,7 @@ function NGSCalculator() {
     base: out.K6,
     fmt: usd0
   }), React.createElement(FinRow, {
-    label: "Total future setup",
+    label: "Total cost of ownership (future)",
     cost: out.K22,
     base: out.K6,
     fmt: usd0,

@@ -10,6 +10,29 @@ const perSample = (total, volume) => (volume > 0 ? total / volume : NaN);
 const years = y => (nn(y) > 0 ? nn(y) : 1);
 const maxPerFlowcell = (H, reads) => (H > 0 && reads > 0 ? Math.floor(H / reads + EPS) : null);
 
+// Somatic depth needed to see k variant reads at this VAF: depth = k / VAF.
+// Example: 50 variant reads at 5% VAF -> 1,000x.
+function minDepthForVaf(vaf, k) {
+  const f = nn(vaf), kk = nn(k);
+  if (!(f > 0 && f < 1) || !kk) return null;
+  return Math.ceil(kk / f - EPS);
+}
+// Coverage requirement for a panel. Germline: minimum depth per base. Somatic: depth for
+// the panel's VAF. The weakest bases reach minToMean % of the mean, so required mean =
+// required minimum / (minToMean / 100). Depth scales with reads, so reads needed =
+// stated reads x required mean / stated mean depth.
+function coverageCheck(b, cov) {
+  const depth = nn(b.depth), reads = nn(b.reads);
+  if (!b.app || !depth || !reads) return null;
+  const somatic = b.app === "Somatic";
+  const reqMin = somatic ? minDepthForVaf(nn(b.vaf) / 100, cov.minAltReads) : nn(cov.germlineMin);
+  const ratio = nn(cov.minToMean) / 100;
+  if (!reqMin || !ratio) return null;
+  const reqMean = reqMin / ratio;
+  const readsNeeded = reads * reqMean / depth;
+  return { somatic, reqMin, reqMean, readsNeeded, depth, meets: reads >= readsNeeded - EPS };
+}
+
 function routine(panels, H, fcCost, runs, multiplex, runtime) {
   // Not multiplexed: a single panel per flow cell, so only the first row counts.
   const active = multiplex ? panels : panels.slice(0, 1);
@@ -105,17 +128,17 @@ const SRC = {
   aviti: "https://elementbiosciences.com/products/aviti/specs",
 };
 const SEED_BUNDLES = [
-  { id: "p-tso500", name: "TruSight Oncology 500", vendor: "Illumina", reads: 100, price: 690, basis: "Vendor-stated", source: SRC.tso500, note: "100M paired-end reads per sample" },
-  { id: "p-tso500ctdna", name: "TruSight Oncology 500 ctDNA v2", vendor: "Illumina", reads: 800, price: 0, basis: "Vendor-stated", source: SRC.tso500ct, note: "~800M paired-end reads per sample, before read collapsing" },
-  { id: "p-ampli-comp3", name: "AmpliSeq for Illumina Comprehensive Panel v3", vendor: "Illumina", reads: 16.25, price: 0, basis: "Derived", source: SRC.ampComp, note: "16 samples per NextSeq 550 Mid Output (260M reads) and 48 per High Output (800M reads), 500x minimum" },
-  { id: "p-ampli-focus", name: "AmpliSeq for Illumina Focus Panel", vendor: "Illumina", reads: 1, price: 0, basis: "Derived", source: SRC.ampFocus, note: "48 samples per MiSeq v3 (50M reads), 500x minimum" },
-  { id: "p-sophia-msk", name: "MSK-IMPACT powered with SOPHiA DDM (tumor + normal pair)", vendor: "SOPHiA GENETICS", reads: 66, price: 0, basis: "Vendor-stated", source: SRC.msk, note: "66M paired-end reads per tumor/normal pair (12 pairs per NextSeq 550 High Output). Count one sample per pair." },
-  { id: "p-sophia-ces3", name: "SOPHiA DDM Clinical Exome Solution v3", vendor: "SOPHiA GENETICS", reads: 16.25, price: 0, basis: "Vendor-stated", source: SRC.ces, note: "Performance data at 16.25M reads per sample (16 per NextSeq Mid Output)" },
-  { id: "p-sophia-wes2", name: "SOPHiA DDM Whole Exome Solution v2", vendor: "SOPHiA GENETICS", reads: 80, price: 0, basis: "Vendor-stated", source: SRC.wes, note: "Performance data at 80M reads per sample (the factsheet also lists 12 samples per NextSeq 550 High Output, about 67M each)" },
-  { id: "p-sophia-sts", name: "SOPHiA Solid Tumor Solution (42 genes)", vendor: "SOPHiA GENETICS", reads: 2.08, price: 0, basis: "Derived", source: SRC.sts, note: "24 samples per MiSeq v3 (50M reads) at 1000x median depth" },
-  { id: "p-custom-1", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" },
-  { id: "p-custom-2", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" },
-  { id: "p-custom-3", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" },
+  { id: "p-tso500", name: "TruSight Oncology 500", vendor: "Illumina", reads: 100, price: 690, basis: "Vendor-stated", source: SRC.tso500, note: "100M paired-end reads per sample, 3,500x coverage", app: "Somatic", depth: 3500, vaf: 5 },
+  { id: "p-tso500ctdna", name: "TruSight Oncology 500 ctDNA v2", vendor: "Illumina", reads: 800, price: 0, basis: "Vendor-stated", source: SRC.tso500ct, note: "~800M paired-end reads per sample, ~35,000x before UMI collapsing. Mean depth left blank: the variant-read rule applies to unique reads.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-ampli-comp3", name: "AmpliSeq for Illumina Comprehensive Panel v3", vendor: "Illumina", reads: 16.25, price: 0, basis: "Derived", source: SRC.ampComp, note: "16 samples per NextSeq 550 Mid Output (260M reads) and 48 per High Output (800M reads), 500x minimum", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-ampli-focus", name: "AmpliSeq for Illumina Focus Panel", vendor: "Illumina", reads: 1, price: 0, basis: "Derived", source: SRC.ampFocus, note: "48 samples per MiSeq v3 (50M reads), 500x minimum", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-sophia-msk", name: "MSK-IMPACT powered with SOPHiA DDM (tumor + normal pair)", vendor: "SOPHiA GENETICS", reads: 66, price: 0, basis: "Vendor-stated", source: SRC.msk, note: "66M paired-end reads per tumor/normal pair (12 pairs per NextSeq 550 High Output). Count one sample per pair.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-sophia-ces3", name: "SOPHiA DDM Clinical Exome Solution v3", vendor: "SOPHiA GENETICS", reads: 16.25, price: 0, basis: "Vendor-stated", source: SRC.ces, note: "Performance data at 16.25M reads per sample (16 per NextSeq Mid Output)", app: "Germline", depth: "", vaf: 5 },
+  { id: "p-sophia-wes2", name: "SOPHiA DDM Whole Exome Solution v2", vendor: "SOPHiA GENETICS", reads: 80, price: 0, basis: "Vendor-stated", source: SRC.wes, note: "Performance data at 80M reads per sample (the factsheet also lists 12 samples per NextSeq 550 High Output, about 67M each)", app: "Germline", depth: "", vaf: 5 },
+  { id: "p-sophia-sts", name: "SOPHiA Solid Tumor Solution (42 genes)", vendor: "SOPHiA GENETICS", reads: 2.08, price: 0, basis: "Derived", source: SRC.sts, note: "24 samples per MiSeq v3 (50M reads) at 1000x median depth", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-custom-1", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
+  { id: "p-custom-2", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
+  { id: "p-custom-3", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
 ];
 // Flow cells grouped by sequencer: [name, M reads per flow cell (total reads), run time in hours]
 const SEED_SEQUENCERS = [
@@ -150,6 +173,7 @@ function defaultScenario() {
     seq: { enabled: "No", sequencerId: "s-novaseqx", price: 0, years: 1, volume: 2000 },
     reseq: { enabled: "No", curRate: 5, futRate: 5 },
     data: { enabled: "No", mode: "Annual fee", curAnnual: 50000, futAnnual: 50000, curPer: 20, futPer: 20 },
+    coverage: { sizeByReq: "No", germlineMin: 30, minAltReads: 50, minToMean: 20 },
   };
 }
 // Accepts a saved or imported scenario and fills any missing parts from the defaults.
@@ -161,11 +185,11 @@ function normalizeScenario(s) {
   const panels = (v, fb) => (Array.isArray(v) && v.length ? v.slice(0, 3).map(p => ({ bundleId: String((p && p.bundleId) || ""), samples: p && p.samples !== undefined ? p.samples : 0 })) : fb);
   const out = {
     schema: SCHEMA, tab: ["multiplex", "compare", "database", "combined"].includes(s.tab) ? s.tab : d.tab,
-    bundles: arr(s.bundles, d.bundles).filter(b => b && b.id).map(b => ({ ...{ name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" }, ...b })),
+    bundles: arr(s.bundles, d.bundles).filter(b => b && b.id).map(b => ({ ...{ name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 }, ...b })),
     sequencers: arr(s.sequencers, d.sequencers).filter(x => x && x.id).map(x => ({ name: "", source: "", verified: false, ...x, flowcells: arr(x.flowcells, []).filter(f => f && f.id) })),
     robots: arr(s.robots, d.robots).filter(r => r && r.id),
     current: obj(s.current, d.current), future: obj(s.future, d.future), mplex: obj(s.mplex, d.mplex),
-    robot: obj(s.robot, d.robot), seq: obj(s.seq, d.seq), reseq: obj(s.reseq, d.reseq), data: obj(s.data, d.data),
+    robot: obj(s.robot, d.robot), seq: obj(s.seq, d.seq), reseq: obj(s.reseq, d.reseq), data: obj(s.data, d.data), coverage: obj(s.coverage, d.coverage),
   };
   out.current.panels = panels(out.current.panels, d.current.panels);
   out.future.panels = panels(out.future.panels, d.future.panels);
@@ -187,4 +211,4 @@ function clearSaved() {
 const uid = p => p + "-" + Math.random().toString(36).slice(2, 9);
 
 
-export { ROBOT_MODELS, EPS, ceilSafe, nn, perSample, years, maxPerFlowcell, routine, model, SEED_BUNDLES, SEED_SEQUENCERS, SEED_ROBOTS, defaultScenario, normalizeScenario, COPYRIGHT, SCHEMA };
+export { ROBOT_MODELS, EPS, ceilSafe, nn, perSample, years, maxPerFlowcell, minDepthForVaf, coverageCheck, routine, model, SEED_BUNDLES, SEED_SEQUENCERS, SEED_ROBOTS, defaultScenario, normalizeScenario, COPYRIGHT, SCHEMA };

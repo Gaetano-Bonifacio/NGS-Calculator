@@ -12,8 +12,8 @@ The calculator is organised into four tabs.
 
 1. **Multiplexing.** See how many samples of one or several panels fit on a flow cell, the total coverage, the average fill per flow cell, and the flow cells needed per run. With multiplexing off, a single panel is placed on the flow cell.
 2. **Current vs Future Sequencing Setup.** Compare cost per sample, per run and per year, with savings. By default the future setup keeps the current panels and only the sequencer, flow cell, flow cell cost and runs change. Switch "Same panels as current vendor" to No to compare different panels (they start as a copy).
-3. **Product database.** Edit NGS panels, sequencers, flow cells and liquid-handling robots. Commercial panels are pre-filled where the vendor states or implies the reads per sample, each with its source.
-4. **Combined NGS costs.** Layer optional add-ons onto the future setup and roll them into a total: a liquid-handling robot, a sequencer, resequencing and data analysis. A "current all-in" line compares like for like.
+3. **Product database.** Edit NGS panels, sequencers, flow cells and liquid-handling robots, and set the coverage requirements. Commercial panels are pre-filled where the vendor states or implies the reads per sample, each with its source.
+4. **Total Cost of Ownership.** Add equipment (purchase or lease), resequencing and data analysis on top of the future sequencing setup and compare the total with the current vendor. A "current all-in" line compares like for like.
 
 ## How the numbers work
 
@@ -22,7 +22,8 @@ The calculator is organised into four tabs.
 - **Flow cells per run:** multiplexed, the ceiling of the summed coverage; not multiplexed, the ceiling of the single panel's coverage. Rounding ignores floating-point noise, so a flow cell filled to exactly 100% counts as one.
 - **Run cost** is panel reagents plus flow cell cost x flow cells needed. **Yearly cost** is run cost x runs per year.
 - **Cost per sample** is the yearly cost divided by that setup's own annual sample volume.
-- **Robot and sequencer add-ons:** per-sample cost = `(price / depreciation years) / annual sample volume on that equipment`, plus per-sample consumables for the robot. The yearly figure allocates that per-sample cost to the future setup's annual volume.
+- **Coverage requirement.** Requirements are per-base minimums met by at least 95% of target bases. Germline panels default to 30x per base. Somatic panels need enough depth to see at least 50 variant reads at the panel's VAF: depth = variant reads / VAF (5% VAF needs 1,000x, 2% needs 2,500x). Uniformity uses Illumina's metric (95% of bases above 0.2x the mean), so required mean depth = required depth / 20%. Depth scales with reads: reads needed = stated reads x required mean depth / stated mean depth. All defaults are editable. Each panel row shows whether it meets its requirement, and "Size panels by coverage requirement" makes the calculator use the reads needed.
+- **Robot and sequencer (purchase or lease):** per-sample cost = `(cost / years) / annual sample volume on that equipment`, plus per-sample consumables for the robot. The yearly figure allocates that per-sample cost to the future setup's annual volume.
 - **Resequencing** applies a failure rate to the sequencing cost per sample, set separately for each vendor.
 - **Data analysis** is an annual fee (divided by that vendor's annual volume) or a cost per sample, per vendor. Only the future side rolls into the total future figures.
 

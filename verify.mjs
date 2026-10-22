@@ -1,7 +1,7 @@
 // Numeric verification harness for the NGS Calculator.
 // Expected values are derived by hand (shown in comments), not read back from the app.
 // Run after `npm run build`:  npm run verify
-import { routine, model, ceilSafe, maxPerFlowcell, SEED_BUNDLES, SEED_SEQUENCERS, defaultScenario, normalizeScenario } from "./artifact_logic.mjs";
+import { routine, model, ceilSafe, maxPerFlowcell, minDepthForVaf, coverageCheck, SEED_BUNDLES, SEED_SEQUENCERS, defaultScenario, normalizeScenario } from "./artifact_logic.mjs";
 
 let allok = true, n = 0, fails = 0;
 const approx = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b));
@@ -168,5 +168,29 @@ truthy("[11] normalize(default) keeps panels", JSON.stringify(normalizeScenario(
 truthy("[11] normalize rejects other schema", normalizeScenario({ schema: 2 }) === null);
 truthy("[11] normalize rejects garbage", normalizeScenario("x") === null);
 truthy("[11] normalize fills missing parts", normalizeScenario({ schema: 3 }).robots.length === d.robots.length);
+
+console.log("\n[12] Coverage requirement");
+/* Somatic rule: depth = variant reads / VAF. */
+check("[12] 50 reads at 5% VAF -> 1,000x", minDepthForVaf(0.05, 50), 1000);
+check("[12] 50 reads at 2% VAF -> 2,500x", minDepthForVaf(0.02, 50), 2500);
+check("[12] 50 reads at 3% VAF -> 1,667x (rounded up)", minDepthForVaf(0.03, 50), 1667);
+truthy("[12] VAF 0 or 100% -> no depth", minDepthForVaf(0, 50) === null && minDepthForVaf(1, 50) === null);
+const COV = { germlineMin: 30, minAltReads: 50, minToMean: 20 };
+/* TSO500: 1,000 / 20% = 5,000x mean; 100M reads give 3,500x -> needs 100 x 5,000 / 3,500 = 142.86M */
+const tsoC = coverageCheck({ app: "Somatic", depth: 3500, reads: 100, vaf: 5 }, COV);
+check("[12] TSO500 required depth 1,000x", tsoC.reqMin, 1000);
+check("[12] TSO500 required mean 5,000x", tsoC.reqMean, 5000);
+check("[12] TSO500 reads needed 142.86M", tsoC.readsNeeded, 100 * 5000 / 3500);
+truthy("[12] TSO500 at 3,500x mean is below 5,000x", tsoC.meets === false);
+const tsoFlat = coverageCheck({ app: "Somatic", depth: 3500, reads: 100, vaf: 5 }, { ...COV, minToMean: 100 });
+check("[12] with no uniformity margin TSO500 needs 28.57M", tsoFlat.readsNeeded, 100 * 1000 / 3500);
+/* Germline: 30x / 20% = 150x mean; 16.25M reads giving 100x -> needs 24.375M */
+const gC = coverageCheck({ app: "Germline", depth: 100, reads: 16.25, vaf: 5 }, COV);
+check("[12] germline required mean 150x", gC.reqMean, 150);
+check("[12] germline reads needed 24.375M", gC.readsNeeded, 24.375);
+truthy("[12] germline at 100x mean is below requirement", gC.meets === false);
+truthy("[12] no mean depth -> no check", coverageCheck({ app: "Somatic", depth: "", reads: 100, vaf: 5 }, COV) === null);
+truthy("[12] no application -> no check", coverageCheck({ app: "", depth: 3500, reads: 100, vaf: 5 }, COV) === null);
+check("[12] seeded TSO500 mean depth 3,500x (Illumina)", SEED_BUNDLES[0].depth, 3500);
 
 console.log("\n" + (allok ? "ALL " + n + " CHECKS PASSED" : fails + " OF " + n + " CHECKS FAILED"));

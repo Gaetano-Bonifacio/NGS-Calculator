@@ -29,6 +29,29 @@ const perSample = (total, volume) => (volume > 0 ? total / volume : NaN);
 const years = y => (nn(y) > 0 ? nn(y) : 1);
 const maxPerFlowcell = (H, reads) => (H > 0 && reads > 0 ? Math.floor(H / reads + EPS) : null);
 
+// Somatic depth needed to see k variant reads at this VAF: depth = k / VAF.
+// Example: 50 variant reads at 5% VAF -> 1,000x.
+function minDepthForVaf(vaf, k) {
+  const f = nn(vaf), kk = nn(k);
+  if (!(f > 0 && f < 1) || !kk) return null;
+  return Math.ceil(kk / f - EPS);
+}
+// Coverage requirement for a panel. Germline: minimum depth per base. Somatic: depth for
+// the panel's VAF. The weakest bases reach minToMean % of the mean, so required mean =
+// required minimum / (minToMean / 100). Depth scales with reads, so reads needed =
+// stated reads x required mean / stated mean depth.
+function coverageCheck(b, cov) {
+  const depth = nn(b.depth), reads = nn(b.reads);
+  if (!b.app || !depth || !reads) return null;
+  const somatic = b.app === "Somatic";
+  const reqMin = somatic ? minDepthForVaf(nn(b.vaf) / 100, cov.minAltReads) : nn(cov.germlineMin);
+  const ratio = nn(cov.minToMean) / 100;
+  if (!reqMin || !ratio) return null;
+  const reqMean = reqMin / ratio;
+  const readsNeeded = reads * reqMean / depth;
+  return { somatic, reqMin, reqMean, readsNeeded, depth, meets: reads >= readsNeeded - EPS };
+}
+
 function routine(panels, H, fcCost, runs, multiplex, runtime) {
   // Not multiplexed: a single panel per flow cell, so only the first row counts.
   const active = multiplex ? panels : panels.slice(0, 1);
@@ -124,17 +147,17 @@ const SRC = {
   aviti: "https://elementbiosciences.com/products/aviti/specs",
 };
 const SEED_BUNDLES = [
-  { id: "p-tso500", name: "TruSight Oncology 500", vendor: "Illumina", reads: 100, price: 690, basis: "Vendor-stated", source: SRC.tso500, note: "100M paired-end reads per sample" },
-  { id: "p-tso500ctdna", name: "TruSight Oncology 500 ctDNA v2", vendor: "Illumina", reads: 800, price: 0, basis: "Vendor-stated", source: SRC.tso500ct, note: "~800M paired-end reads per sample, before read collapsing" },
-  { id: "p-ampli-comp3", name: "AmpliSeq for Illumina Comprehensive Panel v3", vendor: "Illumina", reads: 16.25, price: 0, basis: "Derived", source: SRC.ampComp, note: "16 samples per NextSeq 550 Mid Output (260M reads) and 48 per High Output (800M reads), 500x minimum" },
-  { id: "p-ampli-focus", name: "AmpliSeq for Illumina Focus Panel", vendor: "Illumina", reads: 1, price: 0, basis: "Derived", source: SRC.ampFocus, note: "48 samples per MiSeq v3 (50M reads), 500x minimum" },
-  { id: "p-sophia-msk", name: "MSK-IMPACT powered with SOPHiA DDM (tumor + normal pair)", vendor: "SOPHiA GENETICS", reads: 66, price: 0, basis: "Vendor-stated", source: SRC.msk, note: "66M paired-end reads per tumor/normal pair (12 pairs per NextSeq 550 High Output). Count one sample per pair." },
-  { id: "p-sophia-ces3", name: "SOPHiA DDM Clinical Exome Solution v3", vendor: "SOPHiA GENETICS", reads: 16.25, price: 0, basis: "Vendor-stated", source: SRC.ces, note: "Performance data at 16.25M reads per sample (16 per NextSeq Mid Output)" },
-  { id: "p-sophia-wes2", name: "SOPHiA DDM Whole Exome Solution v2", vendor: "SOPHiA GENETICS", reads: 80, price: 0, basis: "Vendor-stated", source: SRC.wes, note: "Performance data at 80M reads per sample (the factsheet also lists 12 samples per NextSeq 550 High Output, about 67M each)" },
-  { id: "p-sophia-sts", name: "SOPHiA Solid Tumor Solution (42 genes)", vendor: "SOPHiA GENETICS", reads: 2.08, price: 0, basis: "Derived", source: SRC.sts, note: "24 samples per MiSeq v3 (50M reads) at 1000x median depth" },
-  { id: "p-custom-1", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" },
-  { id: "p-custom-2", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" },
-  { id: "p-custom-3", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" },
+  { id: "p-tso500", name: "TruSight Oncology 500", vendor: "Illumina", reads: 100, price: 690, basis: "Vendor-stated", source: SRC.tso500, note: "100M paired-end reads per sample, 3,500x coverage", app: "Somatic", depth: 3500, vaf: 5 },
+  { id: "p-tso500ctdna", name: "TruSight Oncology 500 ctDNA v2", vendor: "Illumina", reads: 800, price: 0, basis: "Vendor-stated", source: SRC.tso500ct, note: "~800M paired-end reads per sample, ~35,000x before UMI collapsing. Mean depth left blank: the variant-read rule applies to unique reads.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-ampli-comp3", name: "AmpliSeq for Illumina Comprehensive Panel v3", vendor: "Illumina", reads: 16.25, price: 0, basis: "Derived", source: SRC.ampComp, note: "16 samples per NextSeq 550 Mid Output (260M reads) and 48 per High Output (800M reads), 500x minimum", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-ampli-focus", name: "AmpliSeq for Illumina Focus Panel", vendor: "Illumina", reads: 1, price: 0, basis: "Derived", source: SRC.ampFocus, note: "48 samples per MiSeq v3 (50M reads), 500x minimum", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-sophia-msk", name: "MSK-IMPACT powered with SOPHiA DDM (tumor + normal pair)", vendor: "SOPHiA GENETICS", reads: 66, price: 0, basis: "Vendor-stated", source: SRC.msk, note: "66M paired-end reads per tumor/normal pair (12 pairs per NextSeq 550 High Output). Count one sample per pair.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-sophia-ces3", name: "SOPHiA DDM Clinical Exome Solution v3", vendor: "SOPHiA GENETICS", reads: 16.25, price: 0, basis: "Vendor-stated", source: SRC.ces, note: "Performance data at 16.25M reads per sample (16 per NextSeq Mid Output)", app: "Germline", depth: "", vaf: 5 },
+  { id: "p-sophia-wes2", name: "SOPHiA DDM Whole Exome Solution v2", vendor: "SOPHiA GENETICS", reads: 80, price: 0, basis: "Vendor-stated", source: SRC.wes, note: "Performance data at 80M reads per sample (the factsheet also lists 12 samples per NextSeq 550 High Output, about 67M each)", app: "Germline", depth: "", vaf: 5 },
+  { id: "p-sophia-sts", name: "SOPHiA Solid Tumor Solution (42 genes)", vendor: "SOPHiA GENETICS", reads: 2.08, price: 0, basis: "Derived", source: SRC.sts, note: "24 samples per MiSeq v3 (50M reads) at 1000x median depth", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-custom-1", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
+  { id: "p-custom-2", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
+  { id: "p-custom-3", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
 ];
 // Flow cells grouped by sequencer: [name, M reads per flow cell (total reads), run time in hours]
 const SEED_SEQUENCERS = [
@@ -169,6 +192,7 @@ function defaultScenario() {
     seq: { enabled: "No", sequencerId: "s-novaseqx", price: 0, years: 1, volume: 2000 },
     reseq: { enabled: "No", curRate: 5, futRate: 5 },
     data: { enabled: "No", mode: "Annual fee", curAnnual: 50000, futAnnual: 50000, curPer: 20, futPer: 20 },
+    coverage: { sizeByReq: "No", germlineMin: 30, minAltReads: 50, minToMean: 20 },
   };
 }
 // Accepts a saved or imported scenario and fills any missing parts from the defaults.
@@ -180,11 +204,11 @@ function normalizeScenario(s) {
   const panels = (v, fb) => (Array.isArray(v) && v.length ? v.slice(0, 3).map(p => ({ bundleId: String((p && p.bundleId) || ""), samples: p && p.samples !== undefined ? p.samples : 0 })) : fb);
   const out = {
     schema: SCHEMA, tab: ["multiplex", "compare", "database", "combined"].includes(s.tab) ? s.tab : d.tab,
-    bundles: arr(s.bundles, d.bundles).filter(b => b && b.id).map(b => ({ ...{ name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" }, ...b })),
+    bundles: arr(s.bundles, d.bundles).filter(b => b && b.id).map(b => ({ ...{ name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 }, ...b })),
     sequencers: arr(s.sequencers, d.sequencers).filter(x => x && x.id).map(x => ({ name: "", source: "", verified: false, ...x, flowcells: arr(x.flowcells, []).filter(f => f && f.id) })),
     robots: arr(s.robots, d.robots).filter(r => r && r.id),
     current: obj(s.current, d.current), future: obj(s.future, d.future), mplex: obj(s.mplex, d.mplex),
-    robot: obj(s.robot, d.robot), seq: obj(s.seq, d.seq), reseq: obj(s.reseq, d.reseq), data: obj(s.data, d.data),
+    robot: obj(s.robot, d.robot), seq: obj(s.seq, d.seq), reseq: obj(s.reseq, d.reseq), data: obj(s.data, d.data), coverage: obj(s.coverage, d.coverage),
   };
   out.current.panels = panels(out.current.panels, d.current.panels);
   out.future.panels = panels(out.future.panels, d.future.panels);
@@ -210,6 +234,14 @@ const usd0 = n => (n == null || isNaN(n)) ? "-" : n.toLocaleString("en-US", { st
 const usd2 = n => (n == null || isNaN(n)) ? "-" : n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pct1 = n => (n == null || isNaN(n)) ? "-" : (n * 100).toFixed(1) + "%";
 const int = n => (n == null || isNaN(n)) ? "-" : Math.round(n).toLocaleString("en-US");
+const fmtM = v => (v == null || isNaN(v)) ? "-" : (Math.round(v * 10) / 10).toLocaleString("en-US");
+const covReq = b => b.check.somatic ? nn(b.vaf) + "% VAF" : int(b.check.reqMin) + "x minimum";
+const covText = b => {
+  const c = b.check;
+  if (b.sized) return "Sized by coverage: " + fmtM(c.readsNeeded) + " M reads for " + covReq(b) + " (" + int(c.reqMean) + "x mean)";
+  if (c.meets) return "Meets " + covReq(b) + ": needs " + int(c.reqMean) + "x mean, has " + int(c.depth) + "x";
+  return "Below " + covReq(b) + ": needs " + fmtM(c.readsNeeded) + " M reads (" + int(c.reqMean) + "x mean)";
+};
 const compactUsd = v => {
   const a = Math.abs(v);
   if (a >= 1e6) return "$" + (v / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M";
@@ -326,7 +358,8 @@ function PanelRows({ state, set, bundles, H, readOnly }) {
                   onChange={e => setPanel(i, "samples", e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))} />
               </div>
             )}
-            {b && b.name && max != null && <div className="rowhint">Fits up to <b className="num">{int(max)}</b> samples per flow cell at {nn(b.reads)} M reads each</div>}
+            {b && b.name && max != null && <div className="rowhint">Fits up to <b className="num">{int(max)}</b> samples per flow cell at {fmtM(nn(b.reads))} M reads each</div>}
+            {b && b.name && b.check && <div className={"rowhint cov " + (b.check.meets || b.sized ? "ok" : "short")}><span className="cdot" aria-hidden="true" />{covText(b)}</div>}
           </div>
         );
       })}
@@ -511,6 +544,13 @@ const CSS = `
   .panel-row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px;margin-bottom:4px;}
   .rowhint{font-size:11px;color:var(--mut);margin:0 2px 9px;}
   .rowhint b{color:var(--teal);font-weight:600;}
+  .rowhint.cov{display:flex;gap:6px;align-items:baseline;margin-top:-6px;}
+  .cdot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--good);transform:translateY(-1px);}
+  .rowhint.short .cdot{background:var(--bad);} .rowhint.short{color:var(--ink);}
+  .covstat{font-size:11px;white-space:nowrap;} .covstat.ok{color:var(--good);} .covstat.short{color:var(--bad);}
+  .dbtable select:disabled,.dbtable input:disabled{opacity:.45;}
+  .modebar{margin:12px 30px 0;font-size:12px;color:var(--mut);display:flex;gap:8px;align-items:center;}
+  .modebar .cdot{background:var(--teal);}
   .outpanel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px;min-width:0;}
   .out-h{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);font-weight:600;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
   .out-h .bar{width:18px;height:2px;background:var(--teal);}
@@ -554,7 +594,7 @@ const CSS = `
   .dbtable input.dup{border-color:var(--amber);}
   .dbtable .num input{font-family:'IBM Plex Mono',monospace;}
   .dbtable tr.pending td{background:color-mix(in srgb,var(--bad) 8%,transparent);}
-  .panels-db{min-width:820px;} .flow-db{min-width:520px;} .robot-db{min-width:600px;}
+  .panels-db{min-width:1180px;} .flow-db{min-width:520px;} .robot-db{min-width:600px;}
   .panels-db td:first-child{min-width:240px;} .flow-db td:first-child,.robot-db td:first-child{min-width:170px;}
   .seqgroup{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-bottom:12px;background:var(--panel2);}
   .seqgroup-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
@@ -613,7 +653,7 @@ const CSS = `
     .tabs{padding:0 8px;}
     .tab{padding:12px 10px;font-size:12.5px;}
     .layout{padding:16px;gap:4px;}
-    .secthead,.disc,.notice{margin-left:16px;margin-right:16px;}
+    .secthead,.disc,.notice,.modebar{margin-left:16px;margin-right:16px;}
     .section{margin:16px 16px 0;}
     .foot{margin:22px 16px 0;}
     .outpanel{padding:14px;}
@@ -639,6 +679,7 @@ export default function NGSCalculator() {
   const [seq, setSeq] = useState(init.seq);
   const [reseq, setReseq] = useState(init.reseq);
   const [data, setData] = useState(init.data);
+  const [coverage, setCoverage] = useState(init.coverage);
   const [tab, setTab] = useState(init.tab);
   const [notice, setNotice] = useState(null);
   const [pending, setPending] = useState(null);
@@ -646,13 +687,13 @@ export default function NGSCalculator() {
   const fileRef = useRef(null);
   const tabRefs = useRef({});
 
-  const scenario = { schema: SCHEMA, tab, bundles, sequencers, robots, current, future, mplex, robot, seq, reseq, data };
-  useEffect(() => { setSaved(saveScenario(scenario)); }, [tab, bundles, sequencers, robots, current, future, mplex, robot, seq, reseq, data]);
+  const scenario = { schema: SCHEMA, tab, bundles, sequencers, robots, current, future, mplex, robot, seq, reseq, data, coverage };
+  useEffect(() => { setSaved(saveScenario(scenario)); }, [tab, bundles, sequencers, robots, current, future, mplex, robot, seq, reseq, data, coverage]);
   useEffect(() => { if (!notice) return undefined; const t = setTimeout(() => setNotice(null), 5000); return () => clearTimeout(t); }, [notice]);
 
   const applyScenario = s => {
     setBundles(s.bundles); setSequencers(s.sequencers); setRobots(s.robots); setCurrent(s.current); setFuture(s.future);
-    setMplex(s.mplex); setRobot(s.robot); setSeq(s.seq); setReseq(s.reseq); setData(s.data); setTab(s.tab); setPending(null);
+    setMplex(s.mplex); setRobot(s.robot); setSeq(s.seq); setReseq(s.reseq); setData(s.data); setCoverage(s.coverage); setTab(s.tab); setPending(null);
   };
   const exportScenario = () => {
     try {
@@ -682,7 +723,13 @@ export default function NGSCalculator() {
   const resetAll = () => { clearSaved(); applyScenario(defaultScenario()); setNotice({ text: "Reset to the default data. Your saved changes in this browser were cleared." }); };
 
   /* ---------- lookups ---------- */
-  const bMap = useMemo(() => Object.fromEntries(bundles.map(b => [b.id, b])), [bundles]);
+  // Effective panels: each carries its coverage check; with "size by coverage" on, reads per sample = reads needed.
+  const sizeByReq = coverage.sizeByReq === "Yes";
+  const effBundles = useMemo(() => bundles.map(b => {
+    const check = coverageCheck(b, coverage);
+    return sizeByReq && check ? { ...b, check, reads: check.readsNeeded, sized: true } : { ...b, check };
+  }), [bundles, coverage, sizeByReq]);
+  const bMap = useMemo(() => Object.fromEntries(effBundles.map(b => [b.id, b])), [effBundles]);
   const resolveFC = st => {
     const s = sequencers.find(x => x.id === st.sequencerId);
     const f = s && s.flowcells.find(x => x.id === st.flowcellId);
@@ -718,7 +765,7 @@ export default function NGSCalculator() {
 
   /* ---------- database editing ---------- */
   const numOrBlank = v => (v === "" ? "" : Math.max(0, Number(v)));
-  const updateBundle = (id, key, v) => setBundles(bundles.map(b => b.id === id ? { ...b, [key]: ["reads", "price"].includes(key) ? numOrBlank(v) : v } : b));
+  const updateBundle = (id, key, v) => setBundles(bundles.map(b => b.id === id ? { ...b, [key]: ["reads", "price", "depth", "vaf"].includes(key) ? numOrBlank(v) : v } : b));
   const addBundle = () => setBundles([...bundles, { id: uid("p"), name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "" }]);
   const clearPanelRefs = id => {
     const strip = st => ({ ...st, panels: st.panels.map(p => p.bundleId === id ? { ...p, bundleId: "" } : p) });
@@ -771,10 +818,10 @@ export default function NGSCalculator() {
   const combinedChart = bothActive ? [
     { name: anyCurAddon ? "Current all-in" : "Current", panels: out.cur.reagent_sample, flow: out.cur.fc_sample, reseq: out.reseqCur, data: out.dataCurPerSample },
     { name: "Future", panels: out.fut.reagent_sample, flow: out.fut.fc_sample },
-    { name: "Total future", panels: out.fut.reagent_sample, flow: out.fut.fc_sample, reseq: out.reseqFut, data: out.dataFutPerSample, robot: out.robotSample, seq: out.seqSample },
+    { name: "Future TCO", panels: out.fut.reagent_sample, flow: out.fut.fc_sample, reseq: out.reseqFut, data: out.dataFutPerSample, robot: out.robotSample, seq: out.seqSample },
   ] : [];
   const dataChipValid = out.dataCurValid && out.dataFutValid;
-  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["database", "03", "Product database"], ["combined", "04", "Combined NGS costs"]];
+  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["database", "03", "Product database"], ["combined", "04", "Total Cost of Ownership"]];
   const onTabKey = (e, i) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const n = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
@@ -815,6 +862,7 @@ export default function NGSCalculator() {
         ))}
       </nav>
       {notice && <div className={"notice" + (notice.err ? " err" : "")} role="status">{notice.text}</div>}
+      {sizeByReq && tab !== "database" && <div className="modebar"><span className="cdot" aria-hidden="true" />Reads per sample follow the coverage requirement for panels with a mean depth (set in Product database).</div>}
 
       <main role="tabpanel" id={"panel-" + tab} aria-labelledby={"tab-" + tab}>
       {/* SECTION 1 - MULTIPLEXING */}
@@ -828,7 +876,7 @@ export default function NGSCalculator() {
               <Field label="Multiplex panels on one flow cell?" hint={mplex.multiplex === "Yes" ? "Up to 3 panels share each flow cell" : "One panel per flow cell"} group>
                 <Toggle value={mplex.multiplex} onChange={v => setMplex({ ...mplex, multiplex: v })} />
               </Field>
-              <PanelRows state={mplex} set={setMplex} bundles={bundles} H={mx.r.H} />
+              <PanelRows state={mplex} set={setMplex} bundles={effBundles} H={mx.r.H} />
               <SeqFlowFields state={mplex} set={setMplex} sequencers={sequencers}>
                 <Field label="Runs per year"><Num value={mplex.runs} onChange={v => setMplex({ ...mplex, runs: v })} /></Field>
               </SeqFlowFields>
@@ -879,9 +927,9 @@ export default function NGSCalculator() {
         <div className="layout">
           <div>
             <div className="col-h">Input</div>
-            <RoutineCard title="Current Vendor" accent="#5b6b7a" state={current} set={setCurrent} effective={current} bundles={bundles} sequencers={sequencers}
+            <RoutineCard title="Current Vendor" accent="#5b6b7a" state={current} set={setCurrent} effective={current} bundles={effBundles} sequencers={sequencers}
               r={out.cur} active={curActive} costSample={out.K4} warnings={calc.curWarn} />
-            <RoutineCard title="Future Vendor" accent="var(--teal)" state={future} set={setFuture} effective={futEff} bundles={bundles} sequencers={sequencers}
+            <RoutineCard title="Future Vendor" accent="var(--teal)" state={future} set={setFuture} effective={futEff} bundles={effBundles} sequencers={sequencers}
               r={out.fut} active={futActive} costSample={out.K8} warnings={calc.futWarn} mirrorToggle={setFutureMirror} />
           </div>
           <div>
@@ -922,11 +970,23 @@ export default function NGSCalculator() {
           <div className="secthead" style={{ margin: "0 0 6px" }}><b>Product database.</b> Add or edit NGS panels, sequencers, flow cells and robots. Every tab updates live, and renaming an item keeps it selected everywhere.</div>
           <div className="note" style={{ marginBottom: 4 }}><b>Read convention:</b> M reads always means total reads, counting both reads of a paired-end cluster (for example Illumina states TSO 500 as 100M paired-end reads). Enter panels and flow cells in the same convention.</div>
           <div className="outpanel" style={{ marginTop: 14 }}>
+            <div className="out-h"><span className="bar" /> Coverage requirements</div>
+            <div className="addon">
+              <Field label="Germline: minimum depth per base (x)" hint="Recommended 30x"><Num value={coverage.germlineMin} onChange={v => setCoverage({ ...coverage, germlineMin: v })} /></Field>
+              <Field label="Somatic: minimum variant reads" hint="Depth per base = reads / VAF (50 at 5% = 1,000x)"><Num value={coverage.minAltReads} onChange={v => setCoverage({ ...coverage, minAltReads: v })} min={1} /></Field>
+              <Field label="Uniformity: 95% of bases reach (% of mean)" hint="Illumina metric: bases above 0.2x mean = 20"><Num value={coverage.minToMean} onChange={v => setCoverage({ ...coverage, minToMean: v })} min={1} /></Field>
+            </div>
+            <Field label="Size panels by coverage requirement?" hint="No: use the vendor reads per sample. Yes: use the reads needed to meet the requirement (panels with a mean depth only)." group>
+              <Toggle value={coverage.sizeByReq} onChange={v => setCoverage({ ...coverage, sizeByReq: v })} />
+            </Field>
+            <div className="note">Somatic depth = {int(nn(coverage.minAltReads))} variant reads / the panel's VAF (5% VAF needs {int(minDepthForVaf(0.05, coverage.minAltReads))}x). Both are per-base minimums for at least 95% of target bases, so required mean depth = required depth / {int(nn(coverage.minToMean))}%. Reads needed = stated reads x required mean depth / stated mean depth.</div>
+          </div>
+          <div className="outpanel">
             <div className="out-h"><span className="bar" /> NGS panels</div>
-            <div className="note" style={{ marginBottom: 10 }}>Commercial panels are pre-filled where a vendor states or implies the reads per sample. <span className="badge v">Vendor-stated</span> comes from the vendor's documentation, <span className="badge f">Derived</span> is flow cell output divided by the vendor's recommended samples per run. Prices are blank: enter your own.</div>
+            <div className="note" style={{ marginBottom: 10 }}>Commercial panels are pre-filled where a vendor states or implies the reads per sample. <span className="badge v">Vendor-stated</span> comes from the vendor's documentation, <span className="badge f">Derived</span> is flow cell output divided by the vendor's recommended samples per run. Prices are blank: enter your own. To check coverage, set Germline or Somatic and the mean depth the vendor states at those reads.</div>
             <div className="tscroll">
               <table className="dbtable panels-db">
-                <thead><tr><th>NGS panel</th><th style={{ width: 130 }}>Vendor</th><th style={{ width: 110 }}>M reads / sample</th><th style={{ width: 110 }}>Price ($)</th><th style={{ width: 120 }}>Basis</th><th style={{ width: 150 }} /></tr></thead>
+                <thead><tr><th>NGS panel</th><th style={{ width: 130 }}>Vendor</th><th style={{ width: 110 }}>M reads / sample</th><th style={{ width: 100 }}>Price ($)</th><th style={{ width: 110 }}>Use</th><th style={{ width: 100 }}>Mean depth (x)</th><th style={{ width: 80 }}>VAF (%)</th><th style={{ width: 160 }}>Coverage</th><th style={{ width: 120 }}>Basis</th><th style={{ width: 150 }} /></tr></thead>
                 <tbody>
                   {bundles.map(b => (
                     <tr key={b.id} className={pending === "p:" + b.id ? "pending" : ""}>
@@ -934,6 +994,15 @@ export default function NGSCalculator() {
                       <td><input value={b.vendor} placeholder="Vendor" aria-label="Vendor" onChange={e => updateBundle(b.id, "vendor", e.target.value)} /></td>
                       <td className="num"><input type="number" min={0} step="any" value={b.reads} aria-label="M reads per sample" onChange={e => updateBundle(b.id, "reads", e.target.value)} /></td>
                       <td className="num"><input type="number" min={0} step="any" value={b.price} aria-label="Price" onChange={e => updateBundle(b.id, "price", e.target.value)} /></td>
+                      <td><select value={b.app || ""} aria-label="Germline or somatic" onChange={e => updateBundle(b.id, "app", e.target.value)}><option value="">-</option><option value="Germline">Germline</option><option value="Somatic">Somatic</option></select></td>
+                      <td className="num"><input type="number" min={0} step="any" value={b.depth} aria-label="Mean depth at the stated reads" onChange={e => updateBundle(b.id, "depth", e.target.value)} /></td>
+                      <td className="num"><input type="number" min={0} max={100} step="any" value={b.app === "Somatic" ? b.vaf : ""} disabled={b.app !== "Somatic"} placeholder={b.app === "Germline" ? int(nn(coverage.germlineMin)) + "x" : ""} aria-label="Lowest VAF to detect, percent" onChange={e => updateBundle(b.id, "vaf", e.target.value)} /></td>
+                      <td>{(() => {
+                        if (!b.app) return <span className="covstat">-</span>;
+                        const c = coverageCheck(b, coverage);
+                        if (!c) return <span className="covstat">Add mean depth</span>;
+                        return <span className={"covstat " + (c.meets ? "ok" : "short")} title={"Needs " + int(c.reqMin) + "x minimum, " + int(c.reqMean) + "x mean"}>{c.meets ? "Meets" : "Below"} &middot; needs {fmtM(c.readsNeeded)} M</span>;
+                      })()}</td>
                       <td>
                         {b.source ? <a className="srcl" href={b.source} target="_blank" rel="noopener noreferrer" title={b.note || "Source"}><span className={"badge " + (b.basis === "Vendor-stated" ? "v" : b.basis === "Derived" ? "f" : "")}>{b.basis}</span></a>
                           : <span className="badge">{b.basis || "Custom"}</span>}
@@ -993,10 +1062,10 @@ export default function NGSCalculator() {
 
           <div className="outpanel">
             <div className="out-h"><span className="bar" /> Liquid-handling robots</div>
-            <div className="note" style={{ marginBottom: 10 }}>Robots used in Combined NGS costs. Price and consumables are your own figures. Per-sample cost = (price / depreciation years) / annual sample volume on the robot.</div>
+            <div className="note" style={{ marginBottom: 10 }}>Robots used in Total Cost of Ownership. Enter a purchase price or a lease cost, and the years it covers. Per-sample cost = cost / years / annual sample volume on the robot.</div>
             <div className="tscroll">
               <table className="dbtable robot-db">
-                <thead><tr><th>Robot</th><th style={{ width: 120 }}>Price ($)</th><th style={{ width: 130 }}>Consumables ($ / sample)</th><th style={{ width: 120 }}>Depreciation (yrs)</th><th style={{ width: 150 }} /></tr></thead>
+                <thead><tr><th>Robot</th><th style={{ width: 130 }}>Purchase or lease ($)</th><th style={{ width: 130 }}>Consumables ($ / sample)</th><th style={{ width: 120 }}>Spread over (yrs)</th><th style={{ width: 150 }} /></tr></thead>
                 <tbody>
                   {robots.map(r => (
                     <tr key={r.id} className={pending === "r:" + r.id ? "pending" : ""}>
@@ -1021,15 +1090,15 @@ export default function NGSCalculator() {
 
       {/* SECTION 4 - COMBINED NGS COSTS */}
       {tab === "combined" && (<>
-        <div className="secthead"><b>Combined NGS costs.</b> Layer optional add-ons onto the future setup defined in Current vs Future Sequencing Setup and roll them into a total.</div>
+        <div className="secthead"><b>Total Cost of Ownership.</b> Add equipment (purchase or lease), resequencing and data analysis on top of the future sequencing setup, and compare the total with the current vendor.</div>
         <details className="disc">
-          <summary><span className="ic">&#9656;</span> How the add-ons are calculated</summary>
+          <summary><span className="ic">&#9656;</span> How the total cost of ownership is calculated</summary>
           <div className="body note">
             <ul>
-              <li><b>Robot and sequencer:</b> per-sample cost = (price / depreciation years) / annual sample volume on that equipment. The yearly figure allocates that per-sample cost to the future setup's own annual volume.</li>
+              <li><b>Robot and sequencer (purchase or lease):</b> per-sample cost = cost / years / annual sample volume on that equipment. Enter a purchase price spread over its years of use, or a lease cost with its term. The yearly figure allocates that per-sample cost to the future setup's own annual volume.</li>
               <li><b>Resequencing:</b> failure rate x sequencing cost per sample, set separately for each vendor.</li>
               <li><b>Data analysis:</b> an annual fee (divided by that vendor's annual volume) or a cost per sample, per vendor. Either side can be 0.</li>
-              <li><b>Current all-in</b> adds the current vendor's own resequencing and data analysis, so it compares like for like with the total future cost.</li>
+              <li><b>Current all-in</b> adds the current vendor's own resequencing and data analysis, so it compares like for like with the future total cost of ownership.</li>
             </ul>
           </div>
         </details>
@@ -1041,13 +1110,13 @@ export default function NGSCalculator() {
               <Field label="Include a robot?" group><Toggle value={robot.enabled} onChange={v => setRobot({ ...robot, enabled: v })} /></Field>
               {robot.enabled === "Yes" && (<>
                 <div className="addon">
-                  <Field label="Robot model" hint="Edit the list in Product database"><Select value={robot.robotId} onChange={v => setRobot({ ...robot, robotId: v })} options={robotOptions} placeholder="Select robot" /></Field>
+                  <Field label="Robot model" hint="Edit robots in Product database"><Select value={robot.robotId} onChange={v => setRobot({ ...robot, robotId: v })} options={robotOptions} placeholder="Select robot" /></Field>
                   <Field label="Annual sample volume" hint="All samples run on the robot"><Num value={robot.volume} onChange={v => setRobot({ ...robot, volume: v })} step={100} /></Field>
                 </div>
                 {robotObj && (
                   <div className="addon">
-                    <Field label="Total price ($)"><Num value={robotObj.price} onChange={v => updateRobot(robotObj.id, "price", v)} step={1000} /></Field>
-                    <Field label="Depreciation (years)"><Num value={robotObj.years} onChange={v => updateRobot(robotObj.id, "years", v)} min={1} /></Field>
+                    <Field label="Purchase or lease cost ($)"><Num value={robotObj.price} onChange={v => updateRobot(robotObj.id, "price", v)} step={1000} /></Field>
+                    <Field label="Spread over (years)" hint="Years of use, or the lease term"><Num value={robotObj.years} onChange={v => updateRobot(robotObj.id, "years", v)} min={1} /></Field>
                     <Field label="Consumables ($ / sample)"><Num value={robotObj.consumables} onChange={v => updateRobot(robotObj.id, "consumables", v)} step={0.5} /></Field>
                   </div>
                 )}
@@ -1063,8 +1132,8 @@ export default function NGSCalculator() {
               {seq.enabled === "Yes" && (<>
                 <div className="addon">
                   <Field label="Sequencer"><Select value={seq.sequencerId} onChange={v => setSeq({ ...seq, sequencerId: v })} options={seqOptions} placeholder="Select sequencer" /></Field>
-                  <Field label="Total price ($)"><Num value={seq.price} onChange={v => setSeq({ ...seq, price: v })} step={1000} /></Field>
-                  <Field label="Depreciation (years)"><Num value={seq.years} onChange={v => setSeq({ ...seq, years: v })} min={1} /></Field>
+                  <Field label="Purchase or lease cost ($)"><Num value={seq.price} onChange={v => setSeq({ ...seq, price: v })} step={1000} /></Field>
+                  <Field label="Spread over (years)" hint="Years of use, or the lease term"><Num value={seq.years} onChange={v => setSeq({ ...seq, years: v })} min={1} /></Field>
                   <Field label="Annual sample volume" hint="All samples run on the sequencer"><Num value={seq.volume} onChange={v => setSeq({ ...seq, volume: v })} step={100} /></Field>
                 </div>
                 <div className={"price-chip" + (seqValid ? "" : " invalid")}>
@@ -1113,11 +1182,11 @@ export default function NGSCalculator() {
           <div>
             <div className="col-h">Combined output</div>
             <div className="outpanel">
-              <div className="out-h"><span className="bar" /> Total future setup vs current</div>
+              <div className="out-h"><span className="bar" /> Total cost of ownership vs current</div>
               <Warnings items={compareWarn} />
               {bothActive && (<>
                 <div className="kpis" style={{ marginTop: compareWarn.length ? 12 : 0 }}>
-                  <div className="kpi"><div className="l">Total future / sample</div><div className="v num">{usd2(out.K20)}</div></div>
+                  <div className="kpi"><div className="l">Future TCO / sample</div><div className="v num">{usd2(out.K20)}</div></div>
                   <div className="kpi"><div className="l">{anyCurAddon ? "Saving vs current all-in" : "Saving vs current"} / sample</div><div className={"v num " + ((anyCurAddon ? out.curAllIn : out.K4) - out.K20 > 0 ? "good" : "bad")}>{usd2((anyCurAddon ? out.curAllIn : out.K4) - out.K20)}</div></div>
                   <div className="kpi"><div className="l">{anyCurAddon ? "Saving vs current all-in" : "Saving vs current"} / year</div><div className={"v num " + ((anyCurAddon ? out.curAllInYear : out.K6) - out.K22 > 0 ? "good" : "bad")}>{usd0((anyCurAddon ? out.curAllInYear : out.K6) - out.K22)}</div></div>
                 </div>
@@ -1131,7 +1200,7 @@ export default function NGSCalculator() {
                   {robot.enabled === "Yes" && <FinRow label="Future + robot" cost={out.K12} base={out.K4} />}
                   {seq.enabled === "Yes" && <FinRow label="Future + sequencer" cost={out.K8 + out.seqSample} base={out.K4} />}
                   {data.enabled === "Yes" && <FinRow label="Future + data analysis" cost={out.futPlusData} base={out.K4} />}
-                  <FinRow label="Total future setup" cost={out.K20} base={out.K4} strong />
+                  <FinRow label="Total cost of ownership (future)" cost={out.K20} base={out.K4} strong />
                 </FinTable>
                 <div style={{ marginTop: 14 }} />
                 <FinTable head="Yearly cost">
@@ -1142,7 +1211,7 @@ export default function NGSCalculator() {
                   <FinRow label="Future Vendor" cost={out.K10} base={out.K6} fmt={usd0} />
                   {reseq.enabled === "Yes" && <FinRow label="Future + resequencing" cost={out.futPlusReseqYear} base={out.K6} fmt={usd0} />}
                   {data.enabled === "Yes" && <FinRow label="Future + data analysis" cost={out.futPlusDataYear} base={out.K6} fmt={usd0} />}
-                  <FinRow label="Total future setup" cost={out.K22} base={out.K6} fmt={usd0} strong />
+                  <FinRow label="Total cost of ownership (future)" cost={out.K22} base={out.K6} fmt={usd0} strong />
                 </FinTable>
                 <StackChart title="Cost per sample breakdown" data={combinedChart} keys={["panels", "flow", "reseq", "data", "robot", "seq"]} fmt={usd2} />
               </>)}
