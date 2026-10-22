@@ -145,6 +145,14 @@ const SRC = {
   next2000: "https://www.illumina.com/systems/sequencing-platforms/nextseq-1000-2000/specifications.html",
   miseq: "https://www.illumina.com/systems/sequencing-platforms/miseq/specifications.html",
   aviti: "https://elementbiosciences.com/products/aviti/specs",
+  ilmnExome: "https://emea.illumina.com/content/dam/illumina/gcs/assembled-assets/marketing-literature/illumina-dna-exome-enrich-m-gl-00002/illumina-dna-exome-enrich-data-sheet-m-gl-00002.pdf",
+  ilmnRna: "https://knowledge.illumina.com/library-preparation/general/library-preparation-general-reference_material-list/000010216",
+  archer: "https://www.idtdna.com/pages/products/next-generation-sequencing/archer-ngs-assay-solutions/solid-tumor-research/",
+  pillarSt: "https://www.illumina.com/content/dam/illumina/gcs/assembled-assets/marketing-literature/pillar-oncoreveal-solid-tumor-data-sheet-m-gl-03147/pillar-oncoreveal-solid-tumor-data-sheet-m-gl-03147.PDF",
+  pillarLbx: "https://www.illumina.com/content/dam/illumina/gcs/assembled-assets/marketing-literature/pillar-oncoreveal-essential-lbx-data-sheet-m-gl-03145/pillar-oncoreveal-essential-lbx-data-sheet-m-gl-03145.PDF",
+  xgen: "https://www.idtdna.com/pages/products/next-generation-sequencing/workflow/xgen-ngs-hybridization-capture/pre-designed-hyb-cap-panels/exome-hyb-panel-v2",
+  agilentV8: "https://agilent.com/cs/library/datasheets/public/V5-datasheet-exome-v8-5994-3154EN-agilent.pdf",
+  twistExome: "https://www.twistbioscience.com/content/dam/twistbioscience/resources/2025-08/DOC-001266_ProductSheet_Exome2.0-REV2%20singles.pdf",
 };
 const SEED_BUNDLES = [
   { id: "p-tso500", name: "TruSight Oncology 500", vendor: "Illumina", reads: 100, price: 690, basis: "Vendor-stated", source: SRC.tso500, note: "100M paired-end reads per sample, 3,500x coverage", app: "Somatic", depth: 3500, vaf: 5 },
@@ -155,9 +163,20 @@ const SEED_BUNDLES = [
   { id: "p-sophia-ces3", name: "SOPHiA DDM Clinical Exome Solution v3", vendor: "SOPHiA GENETICS", reads: 16.25, price: 0, basis: "Vendor-stated", source: SRC.ces, note: "Performance data at 16.25M reads per sample (16 per NextSeq Mid Output)", app: "Germline", depth: "", vaf: 5 },
   { id: "p-sophia-wes2", name: "SOPHiA DDM Whole Exome Solution v2", vendor: "SOPHiA GENETICS", reads: 80, price: 0, basis: "Vendor-stated", source: SRC.wes, note: "Performance data at 80M reads per sample (the factsheet also lists 12 samples per NextSeq 550 High Output, about 67M each)", app: "Germline", depth: "", vaf: 5 },
   { id: "p-sophia-sts", name: "SOPHiA Solid Tumor Solution (42 genes)", vendor: "SOPHiA GENETICS", reads: 2.08, price: 0, basis: "Derived", source: SRC.sts, note: "24 samples per MiSeq v3 (50M reads) at 1000x median depth", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-ilmn-exome25", name: "Illumina DNA Prep with Exome 2.5 Enrichment", vendor: "Illumina", reads: 50, price: 0, basis: "Vendor-stated", source: SRC.ilmnExome, note: "Validation data: 50M paired-end reads (2x101) gave 63x mean target coverage over 37.5 Mb", app: "Germline", depth: 63, vaf: 5 },
+  { id: "p-ilmn-rnaexome25", name: "Illumina Rapid RNA Prep with Exome 2.5 Enrichment", vendor: "Illumina", reads: 50, price: 0, basis: "Vendor-stated", source: SRC.ilmnRna, note: "25M clusters (50M reads) per sample; 16 per NextSeq P2. RNA: coverage rule not applied.", app: "", depth: "", vaf: 5 },
+  { id: "p-archer-core", name: "Archer VARIANTPlex Core Solid Tumor (60 genes)", vendor: "Archer (IDT)", reads: 4.5, price: 0, basis: "Vendor-stated", source: SRC.archer + "archer-variantplex-core-solid-tumor-panel", note: "Recommended number of reads 4.5M. Archer does not say whether both reads of a pair are counted.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-archer-focus2", name: "Archer VARIANTPlex Solid Tumor Focus v2 (20 genes)", vendor: "Archer (IDT)", reads: 1.5, price: 0, basis: "Vendor-stated", source: SRC.archer + "archer-variantplex-solid-tumor-focus-v2-panel", note: "Recommended number of reads 1.5M. Archer does not say whether both reads of a pair are counted.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-archer-pan", name: "Archer VARIANTPlex Pan Solid Tumor (185 genes)", vendor: "Archer (IDT)", reads: 25, price: 0, basis: "Vendor-stated", source: SRC.archer + "archer-variantplex-pan-solid-tumor-panel", note: "Recommended number of reads 25M. Archer does not say whether both reads of a pair are counted.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-archer-complete", name: "Archer VARIANTPlex Complete Solid Tumor (430 genes)", vendor: "Archer (IDT)", reads: 45, price: 0, basis: "Vendor-stated", source: SRC.archer + "archer-variantplex-complete-solid-tumor-panel", note: "Recommended number of reads 45M. Archer does not say whether both reads of a pair are counted.", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-archer-sarcoma2", name: "Archer FUSIONPlex Sarcoma v2 (63 genes, RNA)", vendor: "Archer (IDT)", reads: 2, price: 0, basis: "Vendor-stated", source: SRC.archer + "archer-fusionplex-sarcoma-v2-panel", note: "Recommended number of reads 2M. RNA fusion panel: coverage rule not applied.", app: "", depth: "", vaf: 5 },
+  { id: "p-pillar-st", name: "Pillar oncoReveal Solid Tumor (48 genes)", vendor: "Pillar Biosciences", reads: 2, price: 0, basis: "Vendor-stated", source: SRC.pillarSt, note: "~2M paired-end reads per sample; vendor claims SNV/indel detection down to 1% VAF; 98% of targets above 0.2x mean", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-pillar-lbx", name: "Pillar oncoReveal Essential LBx (34 genes)", vendor: "Pillar Biosciences", reads: 10, price: 0, basis: "Vendor-stated", source: SRC.pillarLbx, note: "~10M paired-end reads per sample; liquid biopsy; vendor claims detection down to 0.1% VAF", app: "Somatic", depth: "", vaf: 5 },
+  { id: "p-idt-xgen-exome2", name: "IDT xGen Exome Hyb Panel v2", vendor: "IDT", reads: 50, price: 0, basis: "Benchmark", source: SRC.xgen, note: "Vendor comparison data: 5 Gb at 2x100 (50M reads) gave 64.5x mean target coverage. Not a sequencing recommendation.", app: "Germline", depth: 64.5, vaf: 5 },
+  { id: "p-agilent-exome-v8", name: "Agilent SureSelect Human All Exon V8", vendor: "Agilent", reads: 50, price: 0, basis: "Benchmark", source: SRC.agilentV8, note: "Vendor benchmark downsampled to 50M reads (5 Gb, 2x100). Not a sequencing recommendation.", app: "Germline", depth: "", vaf: 5 },
+  { id: "p-twist-exome2", name: "Twist Exome 2.0", vendor: "Twist Bioscience", reads: 40, price: 0, basis: "Benchmark", source: SRC.twistExome, note: "Vendor comparison data used 6 Gb per sample; 40M reads assumes 2x150 (read length not stated). Not a sequencing recommendation.", app: "Germline", depth: "", vaf: 5 },
   { id: "p-custom-1", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
   { id: "p-custom-2", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
-  { id: "p-custom-3", name: "", vendor: "", reads: 0, price: 0, basis: "Custom", source: "", note: "", app: "", depth: "", vaf: 5 },
 ];
 // Flow cells grouped by sequencer: [name, M reads per flow cell (total reads), run time in hours]
 const SEED_SEQUENCERS = [
@@ -598,7 +617,7 @@ const CSS = `
   .dbtable .num input{font-family:'IBM Plex Mono',monospace;}
   .dbtable tr.pending td{background:color-mix(in srgb,var(--bad) 8%,transparent);}
   .panels-db{min-width:1180px;} .flow-db{min-width:520px;} .robot-db{min-width:600px;}
-  .panels-db td:first-child{min-width:240px;} .flow-db td:first-child,.robot-db td:first-child{min-width:170px;}
+  .panels-db td:first-child{min-width:280px;} .flow-db td:first-child,.robot-db td:first-child{min-width:170px;}
   .seqgroup{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-bottom:12px;background:var(--panel2);}
   .seqgroup-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
   .seqname{flex:1;min-width:160px;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 10px;font-size:13.5px;font-weight:600;font-family:inherit;}
@@ -619,6 +638,7 @@ const CSS = `
   .badge{display:inline-block;font-size:10px;padding:2px 7px;border-radius:20px;border:1px solid var(--line);color:var(--mut);white-space:nowrap;}
   .badge.v{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent);}
   .badge.f{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent);}
+  .badge.b{color:var(--accent2);border-color:color-mix(in srgb,var(--accent2) 40%,transparent);}
   .warns{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
   .warns li{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.5;color:var(--ink);background:color-mix(in srgb,var(--amber) 9%,transparent);border:1px solid color-mix(in srgb,var(--amber) 35%,transparent);border-radius:8px;padding:7px 10px;}
   .warns li.info{background:color-mix(in srgb,var(--accent2) 8%,transparent);border-color:color-mix(in srgb,var(--accent2) 32%,transparent);}
@@ -994,10 +1014,10 @@ export default function NGSCalculator() {
           </div>
           <div className="outpanel">
             <div className="out-h"><span className="bar" /> NGS panels</div>
-            <div className="note" style={{ marginBottom: 10 }}>Commercial panels are pre-filled where a vendor states or implies the reads per sample. <span className="badge v">Vendor-stated</span> comes from the vendor's documentation, <span className="badge f">Derived</span> is flow cell output divided by the vendor's recommended samples per run. Prices are blank: enter your own. To check coverage, set Germline or Somatic and the mean depth the vendor states at those reads.</div>
+            <div className="note" style={{ marginBottom: 10 }}>Commercial panels are pre-filled where a vendor states or implies the reads per sample. <span className="badge v">Vendor-stated</span> comes from the vendor's documentation, <span className="badge f">Derived</span> is flow cell output divided by the vendor's recommended samples per run, <span className="badge b">Benchmark</span> is the read count a vendor used in its own comparison data, not a recommendation. Prices are blank: enter your own. To check coverage, set Germline or Somatic and the mean depth the vendor states at those reads.</div>
             <div className="tscroll">
               <table className="dbtable panels-db">
-                <thead><tr><th>NGS panel</th><th style={{ width: 130 }}>Vendor</th><th style={{ width: 110 }}>M reads / sample</th><th style={{ width: 100 }}>Price ($)</th><th style={{ width: 110 }}>Use</th><th style={{ width: 100 }}>Mean depth (x)</th><th style={{ width: 80 }}>VAF (%)</th><th style={{ width: 160 }}>Coverage</th><th style={{ width: 120 }}>Basis</th><th style={{ width: 150 }} /></tr></thead>
+                <thead><tr><th>NGS panel</th><th style={{ width: 130 }}>Vendor</th><th style={{ width: 110 }}>M reads / sample</th><th style={{ width: 100 }}>Price ($)</th><th style={{ width: 110 }}>Use</th><th style={{ width: 100 }}>Mean depth (x)</th><th style={{ width: 80 }}>VAF (%)</th><th style={{ width: 150 }}>Coverage</th><th style={{ width: 110 }}>Basis</th><th style={{ width: 80 }} /></tr></thead>
                 <tbody>
                   {bundles.map(b => (
                     <tr key={b.id} className={pending === "p:" + b.id ? "pending" : ""}>
@@ -1015,7 +1035,7 @@ export default function NGSCalculator() {
                         return <span className={"covstat " + (c.meets ? "ok" : "short")} title={"Needs " + int(c.reqMin) + "x minimum, " + int(c.reqMean) + "x mean"}>{c.meets ? "Meets" : "Below"} &middot; needs {fmtM(c.readsNeeded)} M</span>;
                       })()}</td>
                       <td>
-                        {b.source ? <a className="srcl" href={b.source} target="_blank" rel="noopener noreferrer" title={b.note || "Source"}><span className={"badge " + (b.basis === "Vendor-stated" ? "v" : b.basis === "Derived" ? "f" : "")}>{b.basis}</span></a>
+                        {b.source ? <a className="srcl" href={b.source} target="_blank" rel="noopener noreferrer" title={b.note || "Source"}><span className={"badge " + (b.basis === "Vendor-stated" ? "v" : b.basis === "Derived" ? "f" : b.basis === "Benchmark" ? "b" : "")}>{b.basis}</span></a>
                           : <span className="badge">{b.basis || "Custom"}</span>}
                       </td>
                       <td style={{ textAlign: "right" }}>

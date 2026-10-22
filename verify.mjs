@@ -141,6 +141,7 @@ console.log("\n[10] Seeded flow cells vs vendor samples-per-flow-cell guidance (
 const H = (seq, fc) => SEED_SEQUENCERS.find(s => s.name === seq).flowcells.find(f => f.name === fc).reads;
 // [sequencer, flow cell, M reads/sample, vendor samples per flow cell, max ratio allowed]
 // Seeds use the upper end of each spec range (NovaSeq 6000 S2 is 6.6-8.2B), so the app may fit a few more than the vendor guide.
+const bundleReadsById = id => SEED_BUNDLES.find(b => b.id === id).reads;
 const guide = [
   ["NextSeq 550", "High Output", 100, 8], ["NextSeq 2000", "P2 2x150", 100, 8], ["NextSeq 2000", "P3 2x150", 100, 24], ["NextSeq 2000", "P4 2x150", 100, 36],
   ["NovaSeq 6000", "SP 2x150", 100, 16], ["NovaSeq 6000", "S1", 100, 32], ["NovaSeq 6000", "S2", 100, 72, 1.3], ["NovaSeq 6000", "S4", 100, 192],
@@ -154,11 +155,23 @@ guide.forEach(([s, f, r, g, tol = 1.15]) => {
   const m = maxPerFlowcell(H(s, f), r);
   truthy("[10] " + s + " " + f + " at " + r + "M: app fits " + m + ", vendor guide " + g, m >= g && m <= g * tol);
 });
+// Illumina Rapid RNA Prep with Exome 2.5: 25M clusters = 50M reads; Illumina lists P2 16, P3 48, P4 72, 10B 400, 25B 1000
+[["NextSeq 2000", "P2 2x150", 16], ["NextSeq 2000", "P3 2x150", 48], ["NextSeq 2000", "P4 2x150", 72], ["NovaSeq X", "10B", 400], ["NovaSeq X", "25B", 1000]].forEach(([sq, f, g]) => {
+  const m = maxPerFlowcell(H(sq, f), bundleReadsById("p-ilmn-rnaexome25"));
+  truthy("[10] RNA Exome 2.5 on " + sq + " " + f + ": app fits " + m + ", Illumina " + g, m >= g && m <= g * 1.15);
+});
+// Illumina DNA Prep with Exome 2.5: 50M reads -> 63x mean, so 100x needs 79.4M; Illumina lists 9 per NextSeq 550 High, 9 per P2, 28 per P3 at 100x
+const ex100 = bundleReadsById("p-ilmn-exome25") * 100 / 63;
+[["NextSeq 550", "High Output", 9], ["NextSeq 2000", "P2 2x150", 9], ["NextSeq 2000", "P3 2x150", 28]].forEach(([sq, f, g]) => {
+  const m = maxPerFlowcell(H(sq, f), ex100);
+  truthy("[10] DNA Exome 2.5 at 100x on " + sq + " " + f + ": app fits " + m + ", Illumina " + g, m >= g && m <= g * 1.15);
+});
 truthy("[10] v2 seed error caught: S4 at 5,000 would fit only 50 TSO500 (guide 192)", maxPerFlowcell(5000, 100) < 192);
 
 console.log("\n[11] Seed and scenario integrity");
 const bundleRead = name => SEED_BUNDLES.find(b => b.name === name).reads;
 check("[11] TSO500 seed = 100", bundleRead("TruSight Oncology 500"), 100);
+truthy("[11] every seeded panel with a name has a source and a basis", SEED_BUNDLES.filter(b => b.name).every(b => b.source && b.basis));
 truthy("[11] panel ids unique", new Set(SEED_BUNDLES.map(b => b.id)).size === SEED_BUNDLES.length);
 const fcIds = SEED_SEQUENCERS.flatMap(s => s.flowcells.map(f => f.id));
 truthy("[11] flow cell ids unique", new Set(fcIds).size === fcIds.length);
