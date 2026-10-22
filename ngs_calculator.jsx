@@ -324,13 +324,13 @@ function routineWarnings(st, resolved, fc, r, bMap) {
   const seen = {};
   visible.forEach((p, i) => {
     const res = resolved[i];
-    if (res.missing) w.push({ text: "Row " + (i + 1) + ": the selected panel was removed or renamed to blank in the Product database." });
+    if (res.missing) w.push({ text: "Row " + (i + 1) + ": the selected panel was removed or renamed to blank in Products & Requirements." });
     else if (!p.bundleId && nn(p.samples) > 0) w.push({ text: "Row " + (i + 1) + " has samples but no panel, so it is ignored." });
-    else if (p.bundleId && res.name && !res.reads) w.push({ text: res.name + " has 0 M reads per sample in the Product database, so it adds no coverage." });
+    else if (p.bundleId && res.name && !res.reads) w.push({ text: res.name + " has 0 M reads per sample in Products & Requirements, so it adds no coverage." });
     if (p.bundleId && res.name) { if (seen[p.bundleId]) w.push({ text: res.name + " is selected in more than one row." }); seen[p.bundleId] = true; }
   });
   if (!fc.found) w.push({ text: "Pick a sequencer and flow cell." });
-  else if (!fc.reads) w.push({ text: "The selected flow cell has 0 M reads in the Product database." });
+  else if (!fc.reads) w.push({ text: "The selected flow cell has 0 M reads in Products & Requirements." });
   if (r.fc_needed > 1) w.push({ level: "info", text: "Needs " + r.fc_needed + " flow cells per run (average fill " + pct1(r.fill) + "). Run time is for one run: check how many flow cells your instrument runs at once." });
   return w;
 }
@@ -515,6 +515,9 @@ const CSS = `
   .tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;}
   .saved{font-size:11px;color:var(--mut);margin-right:4px;}
   .saved .d{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--good);margin-right:5px;vertical-align:middle;}
+  .cardfoot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;}
+  .cardfoot .note.small{margin:0;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
   .notice{margin:12px 30px 0;padding:9px 13px;border-radius:9px;font-size:12.5px;border:1px solid color-mix(in srgb,var(--teal) 40%,transparent);background:color-mix(in srgb,var(--teal) 10%,transparent);}
   .notice.err{border-color:color-mix(in srgb,var(--bad) 45%,transparent);background:color-mix(in srgb,var(--bad) 10%,transparent);}
   .layout{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px;padding:22px 30px;}
@@ -635,6 +638,8 @@ const CSS = `
   .tab:hover{color:var(--ink);}
   .tab.active{color:var(--ink);border-bottom-color:var(--teal);}
   .tab .ix{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--teal);opacity:.85;}
+  .tab.ref{margin-left:auto;border-left:1px solid var(--line);}
+  .tab.ref .ix{font-family:inherit;font-size:13px;}
   .secthead{margin:22px 30px 0;font-size:13px;color:var(--mut);line-height:1.6;}
   .secthead b{color:var(--ink);}
   .mxbk{width:100%;border-collapse:collapse;margin-top:10px;min-width:440px;}
@@ -809,6 +814,11 @@ export default function NGSCalculator() {
   if (!curActive) compareWarn.push({ text: "Current vendor: select a panel with samples per run and a flow cell with reads." });
   if (!futActive) compareWarn.push({ text: "Future vendor: select a panel with samples per run and a flow cell with reads." });
   if (volMismatch) compareWarn.push({ level: "info", text: "Annual volumes differ (current " + int(out.cur_samples_year) + " vs future " + int(out.fut_samples_year) + " samples). Cost per sample is the fair comparison; yearly totals reflect different volumes." });
+  const useAsCurrent = () => {
+    setCurrent({ ...current, multiplex: mplex.multiplex, panels: mplex.panels.map(p => ({ ...p })), sequencerId: mplex.sequencerId, flowcellId: mplex.flowcellId, runs: mplex.runs });
+    setTab("compare");
+    setNotice({ text: "Multiplexing setup copied to the current vendor. Check the flow cell cost." });
+  };
   const setFutureMirror = v => setFuture(v === "No" && future.samePanels === "Yes" ? { ...future, samePanels: "No", panels: current.panels.map(p => ({ ...p })), multiplex: current.multiplex } : { ...future, samePanels: v });
 
   const compareChart = bothActive ? [
@@ -821,7 +831,7 @@ export default function NGSCalculator() {
     { name: "Future TCO", panels: out.fut.reagent_sample, flow: out.fut.fc_sample, reseq: out.reseqFut, data: out.dataFutPerSample, robot: out.robotSample, seq: out.seqSample },
   ] : [];
   const dataChipValid = out.dataCurValid && out.dataFutValid;
-  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["database", "03", "Product database"], ["combined", "04", "Total Cost of Ownership"]];
+  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["combined", "03", "Total Cost of Ownership"], ["database", "", "Products & Requirements"]];
   const onTabKey = (e, i) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const n = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
@@ -856,18 +866,18 @@ export default function NGSCalculator() {
       <nav className="tabs" role="tablist" aria-label="Calculator sections">
         {TABS.map(([id, ix, label], i) => (
           <button type="button" key={id} role="tab" id={"tab-" + id} aria-selected={tab === id} aria-controls={"panel-" + id} tabIndex={tab === id ? 0 : -1}
-            ref={el => { tabRefs.current[id] = el; }} className={"tab" + (tab === id ? " active" : "")} onClick={() => setTab(id)} onKeyDown={e => onTabKey(e, i)}>
-            <span className="ix">{ix}</span>{label}
+            ref={el => { tabRefs.current[id] = el; }} className={"tab" + (tab === id ? " active" : "") + (ix ? "" : " ref")} onClick={() => setTab(id)} onKeyDown={e => onTabKey(e, i)}>
+            {ix ? <span className="ix">{ix}</span> : <span className="ix" aria-hidden="true">&#9881;</span>}{label}
           </button>
         ))}
       </nav>
       {notice && <div className={"notice" + (notice.err ? " err" : "")} role="status">{notice.text}</div>}
-      {sizeByReq && tab !== "database" && <div className="modebar"><span className="cdot" aria-hidden="true" />Reads per sample follow the coverage requirement for panels with a mean depth (set in Product database).</div>}
+      {sizeByReq && tab !== "database" && <div className="modebar"><span className="cdot" aria-hidden="true" />Reads per sample follow the coverage requirement for panels with a mean depth (set in Products & Requirements).</div>}
 
       <main role="tabpanel" id={"panel-" + tab} aria-labelledby={"tab-" + tab}>
       {/* SECTION 1 - MULTIPLEXING */}
       {tab === "multiplex" && (<>
-        <div className="secthead"><b>Multiplexing.</b> Check how many samples of one or several panels fit on a flow cell, and how many flow cells a run needs.</div>
+        <div className="secthead"><b>Multiplexing.</b> Check how many samples of one or several panels fit on a flow cell, and how many flow cells a run needs. Use it on its own, or copy the setup to the current vendor.</div>
         <div className="layout">
           <div>
             <div className="col-h">Input</div>
@@ -881,6 +891,7 @@ export default function NGSCalculator() {
                 <Field label="Runs per year"><Num value={mplex.runs} onChange={v => setMplex({ ...mplex, runs: v })} /></Field>
               </SeqFlowFields>
               <Warnings items={mx.warn} />
+              <div className="cardfoot"><button type="button" className="btn" onClick={useAsCurrent} disabled={!mplexActive}>Use as current setup</button><span className="note small">Copies panels, samples, sequencer, flow cell and runs to the current vendor.</span></div>
             </div>
           </div>
           <div>
@@ -967,7 +978,7 @@ export default function NGSCalculator() {
       {/* SECTION 3 - PRODUCT DATABASE */}
       {tab === "database" && (
         <div className="section">
-          <div className="secthead" style={{ margin: "0 0 6px" }}><b>Product database.</b> Add or edit NGS panels, sequencers, flow cells and robots. Every tab updates live, and renaming an item keeps it selected everywhere.</div>
+          <div className="secthead" style={{ margin: "0 0 6px" }}><b>Products & Requirements.</b> The panels, sequencers, flow cells, robots and coverage rules used by every tab. Changes apply live, and renaming an item keeps it selected everywhere.</div>
           <div className="note" style={{ marginBottom: 4 }}><b>Read convention:</b> M reads always means total reads, counting both reads of a paired-end cluster (for example Illumina states TSO 500 as 100M paired-end reads). Enter panels and flow cells in the same convention.</div>
           <div className="outpanel" style={{ marginTop: 14 }}>
             <div className="out-h"><span className="bar" /> Coverage requirements</div>
@@ -1110,7 +1121,7 @@ export default function NGSCalculator() {
               <Field label="Include a robot?" group><Toggle value={robot.enabled} onChange={v => setRobot({ ...robot, enabled: v })} /></Field>
               {robot.enabled === "Yes" && (<>
                 <div className="addon">
-                  <Field label="Robot model" hint="Edit robots in Product database"><Select value={robot.robotId} onChange={v => setRobot({ ...robot, robotId: v })} options={robotOptions} placeholder="Select robot" /></Field>
+                  <Field label="Robot model" hint="Edit robots in Products & Requirements"><Select value={robot.robotId} onChange={v => setRobot({ ...robot, robotId: v })} options={robotOptions} placeholder="Select robot" /></Field>
                   <Field label="Annual sample volume" hint="All samples run on the robot"><Num value={robot.volume} onChange={v => setRobot({ ...robot, volume: v })} step={100} /></Field>
                 </div>
                 {robotObj && (

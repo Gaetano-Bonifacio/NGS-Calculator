@@ -8,12 +8,13 @@ by Gaetano Bonifacio PhD, MBA | 2026
 
 ## What it does
 
-The calculator is organised into four tabs.
+The calculator has three numbered steps and one reference tab.
 
-1. **Multiplexing.** See how many samples of one or several panels fit on a flow cell, the total coverage, the average fill per flow cell, and the flow cells needed per run. With multiplexing off, a single panel is placed on the flow cell.
+1. **Multiplexing.** See how many samples of one or several panels fit on a flow cell, the total coverage, the average fill per flow cell, and the flow cells needed per run. With multiplexing off, a single panel is placed on the flow cell. "Use as current setup" copies the result to the current vendor.
 2. **Current vs Future Sequencing Setup.** Compare cost per sample, per run and per year, with savings. By default the future setup keeps the current panels and only the sequencer, flow cell, flow cell cost and runs change. Switch "Same panels as current vendor" to No to compare different panels (they start as a copy).
-3. **Product database.** Edit NGS panels, sequencers, flow cells and liquid-handling robots, and set the coverage requirements. Commercial panels are pre-filled where the vendor states or implies the reads per sample, each with its source.
-4. **Total Cost of Ownership.** Add equipment (purchase or lease), resequencing and data analysis on top of the future sequencing setup and compare the total with the current vendor. A "current all-in" line compares like for like.
+3. **Total Cost of Ownership.** Add equipment (purchase or lease), resequencing and data analysis on top of the future sequencing setup and compare the total with the current vendor. A "current all-in" line compares like for like.
+
+**Products & Requirements** (reference tab) holds the NGS panels, sequencers, flow cells, liquid-handling robots and coverage rules used by every step. Commercial panels are pre-filled where the vendor states or implies the reads per sample, each with its source.
 
 ## How the numbers work
 

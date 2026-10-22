@@ -811,11 +811,11 @@ function routineWarnings(st, resolved, fc, r, bMap) {
   visible.forEach((p, i) => {
     const res = resolved[i];
     if (res.missing) w.push({
-      text: "Row " + (i + 1) + ": the selected panel was removed or renamed to blank in the Product database."
+      text: "Row " + (i + 1) + ": the selected panel was removed or renamed to blank in Products & Requirements."
     });else if (!p.bundleId && nn(p.samples) > 0) w.push({
       text: "Row " + (i + 1) + " has samples but no panel, so it is ignored."
     });else if (p.bundleId && res.name && !res.reads) w.push({
-      text: res.name + " has 0 M reads per sample in the Product database, so it adds no coverage."
+      text: res.name + " has 0 M reads per sample in Products & Requirements, so it adds no coverage."
     });
     if (p.bundleId && res.name) {
       if (seen[p.bundleId]) w.push({
@@ -827,7 +827,7 @@ function routineWarnings(st, resolved, fc, r, bMap) {
   if (!fc.found) w.push({
     text: "Pick a sequencer and flow cell."
   });else if (!fc.reads) w.push({
-    text: "The selected flow cell has 0 M reads in the Product database."
+    text: "The selected flow cell has 0 M reads in Products & Requirements."
   });
   if (r.fc_needed > 1) w.push({
     level: "info",
@@ -1214,6 +1214,9 @@ const CSS = `
   .tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;}
   .saved{font-size:11px;color:var(--mut);margin-right:4px;}
   .saved .d{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--good);margin-right:5px;vertical-align:middle;}
+  .cardfoot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;}
+  .cardfoot .note.small{margin:0;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
   .notice{margin:12px 30px 0;padding:9px 13px;border-radius:9px;font-size:12.5px;border:1px solid color-mix(in srgb,var(--teal) 40%,transparent);background:color-mix(in srgb,var(--teal) 10%,transparent);}
   .notice.err{border-color:color-mix(in srgb,var(--bad) 45%,transparent);background:color-mix(in srgb,var(--bad) 10%,transparent);}
   .layout{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px;padding:22px 30px;}
@@ -1334,6 +1337,8 @@ const CSS = `
   .tab:hover{color:var(--ink);}
   .tab.active{color:var(--ink);border-bottom-color:var(--teal);}
   .tab .ix{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--teal);opacity:.85;}
+  .tab.ref{margin-left:auto;border-left:1px solid var(--line);}
+  .tab.ref .ix{font-family:inherit;font-size:13px;}
   .secthead{margin:22px 30px 0;font-size:13px;color:var(--mut);line-height:1.6;}
   .secthead b{color:var(--ink);}
   .mxbk{width:100%;border-collapse:collapse;margin-top:10px;min-width:440px;}
@@ -1717,6 +1722,22 @@ function NGSCalculator() {
     level: "info",
     text: "Annual volumes differ (current " + int(out.cur_samples_year) + " vs future " + int(out.fut_samples_year) + " samples). Cost per sample is the fair comparison; yearly totals reflect different volumes."
   });
+  const useAsCurrent = () => {
+    setCurrent({
+      ...current,
+      multiplex: mplex.multiplex,
+      panels: mplex.panels.map(p => ({
+        ...p
+      })),
+      sequencerId: mplex.sequencerId,
+      flowcellId: mplex.flowcellId,
+      runs: mplex.runs
+    });
+    setTab("compare");
+    setNotice({
+      text: "Multiplexing setup copied to the current vendor. Check the flow cell cost."
+    });
+  };
   const setFutureMirror = v => setFuture(v === "No" && future.samePanels === "Yes" ? {
     ...future,
     samePanels: "No",
@@ -1757,7 +1778,7 @@ function NGSCalculator() {
     seq: out.seqSample
   }] : [];
   const dataChipValid = out.dataCurValid && out.dataFutValid;
-  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["database", "03", "Product database"], ["combined", "04", "Total Cost of Ownership"]];
+  const TABS = [["multiplex", "01", "Multiplexing"], ["compare", "02", "Current vs Future Sequencing Setup"], ["combined", "03", "Total Cost of Ownership"], ["database", "", "Products & Requirements"]];
   const onTabKey = (e, i) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const n = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
@@ -1830,12 +1851,15 @@ function NGSCalculator() {
     ref: el => {
       tabRefs.current[id] = el;
     },
-    className: "tab" + (tab === id ? " active" : ""),
+    className: "tab" + (tab === id ? " active" : "") + (ix ? "" : " ref"),
     onClick: () => setTab(id),
     onKeyDown: e => onTabKey(e, i)
-  }, React.createElement("span", {
+  }, ix ? React.createElement("span", {
     className: "ix"
-  }, ix), label))), notice && React.createElement("div", {
+  }, ix) : React.createElement("span", {
+    className: "ix",
+    "aria-hidden": "true"
+  }, "\u2699"), label))), notice && React.createElement("div", {
     className: "notice" + (notice.err ? " err" : ""),
     role: "status"
   }, notice.text), sizeByReq && tab !== "database" && React.createElement("div", {
@@ -1843,13 +1867,13 @@ function NGSCalculator() {
   }, React.createElement("span", {
     className: "cdot",
     "aria-hidden": "true"
-  }), "Reads per sample follow the coverage requirement for panels with a mean depth (set in Product database)."), React.createElement("main", {
+  }), "Reads per sample follow the coverage requirement for panels with a mean depth (set in Products & Requirements)."), React.createElement("main", {
     role: "tabpanel",
     id: "panel-" + tab,
     "aria-labelledby": "tab-" + tab
   }, tab === "multiplex" && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "secthead"
-  }, React.createElement("b", null, "Multiplexing."), " Check how many samples of one or several panels fit on a flow cell, and how many flow cells a run needs."), React.createElement("div", {
+  }, React.createElement("b", null, "Multiplexing."), " Check how many samples of one or several panels fit on a flow cell, and how many flow cells a run needs. Use it on its own, or copy the setup to the current vendor."), React.createElement("div", {
     className: "layout"
   }, React.createElement("div", null, React.createElement("div", {
     className: "col-h"
@@ -1891,7 +1915,16 @@ function NGSCalculator() {
     })
   }))), React.createElement(Warnings, {
     items: mx.warn
-  }))), React.createElement("div", null, React.createElement("div", {
+  }), React.createElement("div", {
+    className: "cardfoot"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn",
+    onClick: useAsCurrent,
+    disabled: !mplexActive
+  }, "Use as current setup"), React.createElement("span", {
+    className: "note small"
+  }, "Copies panels, samples, sequencer, flow cell and runs to the current vendor.")))), React.createElement("div", null, React.createElement("div", {
     className: "col-h"
   }, "Technical output"), React.createElement("div", {
     className: "outpanel"
@@ -2100,7 +2133,7 @@ function NGSCalculator() {
     style: {
       margin: "0 0 6px"
     }
-  }, React.createElement("b", null, "Product database."), " Add or edit NGS panels, sequencers, flow cells and robots. Every tab updates live, and renaming an item keeps it selected everywhere."), React.createElement("div", {
+  }, React.createElement("b", null, "Products & Requirements."), " The panels, sequencers, flow cells, robots and coverage rules used by every tab. Changes apply live, and renaming an item keeps it selected everywhere."), React.createElement("div", {
     className: "note",
     style: {
       marginBottom: 4
@@ -2569,7 +2602,7 @@ function NGSCalculator() {
     className: "addon"
   }, React.createElement(Field, {
     label: "Robot model",
-    hint: "Edit robots in Product database"
+    hint: "Edit robots in Products & Requirements"
   }, React.createElement(Select, {
     value: robot.robotId,
     onChange: v => setRobot({
