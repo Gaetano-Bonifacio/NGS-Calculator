@@ -1,0 +1,14 @@
+{
+  "name": "ngs-calculator",
+  "private": true,
+  "type": "module",
+  "description": "NGS multiplexing and sequencing economics calculator. by Gaetano Bonifacio PhD, MBA | 2026",
+  "scripts": {
+    "build": "node build.mjs",
+    "verify": "node verify.mjs"
+  },
+  "devDependencies": {
+    "@babel/core": "7.24.7",
+    "@babel/preset-react": "7.24.7"
+  }
+}
